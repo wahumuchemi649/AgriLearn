@@ -203,4 +203,4 @@ All simulation logic lives in `Farm/services.py`; views only validate input and 
 
 ## Team
 
-Final-year project, built by Wahu and a teammate.
+Final-year project, built by Wahu Muchemi and Dorcas Kipyegon.
