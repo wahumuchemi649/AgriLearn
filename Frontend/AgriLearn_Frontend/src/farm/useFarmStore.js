@@ -4,7 +4,8 @@ import {
   getAvailableActions,
   submitAction,
   toActionList,
-  actionPayload,
+  stageId,
+  stageName,
 } from "../api/farm";
 
 export const GRID_SIZE = 4;
@@ -26,6 +27,24 @@ function createPlots() {
   return list;
 }
 
+// The planting day is remembered in this browser so growth survives a refresh.
+const plantedKey = (id) => `agrilearn:plantedDay:${id}`;
+function readPlantedDay(id) {
+  try {
+    const v = localStorage.getItem(plantedKey(id));
+    return v === null ? null : Number(v);
+  } catch {
+    return null;
+  }
+}
+function savePlantedDay(id, day) {
+  try {
+    localStorage.setItem(plantedKey(id), String(day));
+  } catch {
+    /* storage unavailable, ignore */
+  }
+}
+
 export const useFarmStore = create((set, get) => ({
   plots: createPlots(),
   selectedPlotId: null,
@@ -33,42 +52,80 @@ export const useFarmStore = create((set, get) => ({
   cycleId: null,
   cycle: null,
   actions: [],
+  loaded: false,
   loading: false,
   busy: false,
   error: null,
+  plantedDay: null,
+  lastEvent: null, // { name, t } drives the particle burst and the toast
 
   selectPlot: (id) =>
     set((s) => ({ selectedPlotId: s.selectedPlotId === id ? null : id })),
   clearSelection: () => set({ selectedPlotId: null }),
 
+  setPlantedDay: (day) => {
+    const { cycleId } = get();
+    if (cycleId) savePlantedDay(cycleId, day);
+    set({ plantedDay: day });
+  },
+
   loadCycle: async (cycleId) => {
-    set({ cycleId, loading: true, error: null });
+    set({
+      cycleId,
+      loading: true,
+      loaded: false,
+      error: null,
+      lastEvent: null,
+      plantedDay: readPlantedDay(cycleId),
+    });
     try {
       const [cycle, actions] = await Promise.all([
         getCycleState(cycleId),
         getAvailableActions(cycleId),
       ]);
-      console.log("cycle state:", cycle);
-      console.log("available actions:", actions);
-      set({ cycle, actions: toActionList(actions), loading: false });
+      set({ cycle, actions: toActionList(actions), loaded: true, loading: false });
     } catch (e) {
       set({ loading: false, error: e.message });
     }
   },
 
-  performAction: async (action) => {
+  // Light poll: virtual_day and health change on their own as time passes
+  refreshCycle: async () => {
+    const { cycleId, busy } = get();
+    if (!cycleId || busy) return;
+    try {
+      const cycle = await getCycleState(cycleId);
+      if (get().cycleId === cycleId) set({ cycle });
+    } catch {
+      /* ignore transient errors */
+    }
+  },
+
+  performAction: async (stage, extras = {}) => {
     const { cycleId, busy } = get();
     if (busy || !cycleId) return;
     set({ busy: true, error: null });
     try {
-      const result = await submitAction(cycleId, actionPayload(action));
-      console.log("action result:", result);
-      // Re-read from the server: it is the source of truth
+      const name = String(stageName(stage));
+      await submitAction(cycleId, { stage_id: stageId(stage), ...extras });
       const [cycle, actions] = await Promise.all([
         getCycleState(cycleId),
         getAvailableActions(cycleId),
       ]);
-      set({ cycle, actions: toActionList(actions), busy: false });
+      const updates = {
+        cycle,
+        actions: toActionList(actions),
+        busy: false,
+        lastEvent: { name, t: Date.now() },
+      };
+      if (name.toLowerCase().includes("planting")) {
+        const day = Number(cycle.virtual_day);
+        if (Number.isFinite(day)) {
+          updates.plantedDay = day;
+          savePlantedDay(cycleId, day);
+        }
+      }
+      set(updates);
     } catch (e) {
       set({ busy: false, error: e.message });
     }

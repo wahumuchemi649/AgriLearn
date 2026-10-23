@@ -28,24 +28,21 @@ export const submitAction = (cycleId, data) =>
     body: JSON.stringify(data),
   }).then(handle);
 
-// ---- The only place that guesses your response shapes ----
-// Adjust these once you've seen the real JSON.
-
-// available-actions may return a bare list or wrap it in a key
 export function toActionList(data) {
   if (Array.isArray(data)) return data;
-  return data.actions ?? data.available_actions ?? [];
+  return data.actions ?? data.available_actions ?? data.stages ?? [];
 }
 
-// An action may be a string ("water") or an object
-export function actionKey(a) {
-  return typeof a === "string" ? a : a.action_type ?? a.type ?? a.name ?? a.id;
-}
-export function actionLabel(a) {
-  return typeof a === "string" ? a : a.label ?? a.name ?? actionKey(a);
-}
+export const stageId = (a) => a.stage_id ?? a.id ?? a.stage?.id;
+export const stageName = (a) =>
+  a.name ?? a.stage_name ?? a.stage?.name ?? a.action_type ?? `Stage ${stageId(a)}`;
+export const stageType = (a) => a.action_type ?? a.stage?.action_type;
+export const stageEnabled = (a) => a.enabled !== false;
 
-// What we send to POST /actions/
-export function actionPayload(a) {
-  return { action_type: actionKey(a) };
-}
+export const cycleHealth = (c) => {
+  const h = Number(c?.current_health_score);
+  return Number.isFinite(h) ? h : null;
+};
+export const cycleHealthState = (c) => c?.current_health_state ?? null;
+export const cycleDay = (c) => c?.virtual_day ?? null;
+export const cycleState = (c) => c?.status ?? null;
