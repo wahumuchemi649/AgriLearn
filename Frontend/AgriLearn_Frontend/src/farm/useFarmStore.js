@@ -6,6 +6,8 @@ import {
   toActionList,
   stageId,
   stageName,
+  pauseCycle,
+  resumeCycle,
 } from "../api/farm";
 
 export const GRID_SIZE = 4;
@@ -88,7 +90,26 @@ export const useFarmStore = create((set, get) => ({
       set({ loading: false, error: e.message });
     }
   },
+   togglePause: async () => {
+    const { cycleId, cycle, busy } = get();
+    if (!cycleId || !cycle || busy) return;
+    const wasPaused = Boolean(cycle.is_paused);
 
+    // Flip the screen at once, then confirm with the server
+    set({ busy: true, error: null, cycle: { ...cycle, is_paused: !wasPaused } });
+    try {
+      await (wasPaused ? resumeCycle(cycleId) : pauseCycle(cycleId));
+      const fresh = await getCycleState(cycleId);
+      set({ cycle: fresh, busy: false });
+    } catch (e) {
+      // Undo the flip if the server refused
+      set({
+        cycle: { ...get().cycle, is_paused: wasPaused },
+        busy: false,
+        error: e.message,
+      });
+    }
+  },
   // Light poll: virtual_day and health change on their own as time passes
   refreshCycle: async () => {
     const { cycleId, busy } = get();
@@ -102,8 +123,8 @@ export const useFarmStore = create((set, get) => ({
   },
 
   performAction: async (stage, extras = {}) => {
-    const { cycleId, busy } = get();
-    if (busy || !cycleId) return;
+        const { cycleId, busy, actions } = get();
+       if (busy || !cycleId || get().cycle?.is_paused) return;
     set({ busy: true, error: null });
     try {
       const name = String(stageName(stage));

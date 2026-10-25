@@ -46,3 +46,12 @@ export const cycleHealth = (c) => {
 export const cycleHealthState = (c) => c?.current_health_state ?? null;
 export const cycleDay = (c) => c?.virtual_day ?? null;
 export const cycleState = (c) => c?.status ?? null;
+export const getDebrief = (cycleId) =>
+  fetch(`${BASE_URL}/cycles/${cycleId}/debrief/`).then(handle);
+export const pauseCycle = (cycleId) =>
+  fetch(`${BASE_URL}/cycles/${cycleId}/pause/`, { method: "POST" }).then(handle);
+
+export const resumeCycle = (cycleId) =>
+  fetch(`${BASE_URL}/cycles/${cycleId}/resume/`, { method: "POST" }).then(handle);
+export const isPaused = (c) =>
+  Boolean(c?.is_paused) && String(c?.status ?? "").toLowerCase() === "active";

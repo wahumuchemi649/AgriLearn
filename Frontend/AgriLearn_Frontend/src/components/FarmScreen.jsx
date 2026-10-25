@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useParams } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import { useFarmStore, PLOT_SIZE } from "../farm/useFarmStore";
 import ActionPanel from "../farm/ActionPanel";
 import { World } from "../farm/World";
@@ -9,6 +9,7 @@ import { FieldBushes, Worker, MaizeField, Furrows, useFieldProgress } from "../f
 import { Particles, CameraRig, StageFx } from "../farm/Effects";
 import { sfx, isMuted, setMuted } from "../farm/sound";
 import { cycleHealth, cycleHealthState, cycleDay, cycleState } from "../api/farm";
+
 
 const WEEDY = "#5f7f35";
 const SOIL = "#8b5a2b";
@@ -111,10 +112,13 @@ export default function FarmScene() {
   const error = useFarmStore((s) => s.error);
   const cycle = useFarmStore((s) => s.cycle);
   const [muted, setMutedState] = useState(isMuted());
+  const togglePause = useFarmStore((s) => s.togglePause);
+  const busy = useFarmStore((s) => s.busy);
 
   useEffect(() => {
     loadCycle(cycleId);
   }, [cycleId, loadCycle]);
+  
 
   useEffect(() => {
     const id = setInterval(refreshCycle, 3000);
@@ -126,9 +130,10 @@ export default function FarmScene() {
       <Canvas
         orthographic
         shadows="percentage"
+        frameloop={cycle?.is_paused ? "never" : "always"}
         camera={{ near: 0.1, far: 1000 }}
         onPointerMissed={clearSelection}
-      >
+       >
         <CameraRig />
         <World />
         <PlotGrid />
@@ -163,20 +168,51 @@ export default function FarmScene() {
       </button>
 
       {cycle && (
-        <div className="absolute top-4 right-4 bg-white/90 rounded-xl shadow px-4 py-3 text-sm text-gray-800">
-          <div>
-            Day: <b>{Math.floor(Number(cycleDay(cycle)) || 0)}</b>
-          </div>
-          <div>
-            Health: <b>{cycleHealth(cycle) ?? "-"}</b>
-            {cycleHealthState(cycle) && ` (${cycleHealthState(cycle)})`}
-          </div>
-          <div>
-            State: <b>{String(cycleState(cycle) ?? "-")}</b>
-          </div>
-        </div>
-      )}
-
+  <div className="absolute top-4 right-4 bg-white/90 rounded-xl shadow px-4 py-3 text-sm text-gray-800">
+    <div>
+      Day: <b>{Math.floor(Number(cycleDay(cycle)) || 0)}</b>
+    </div>
+    <div>
+      Health: <b>{cycleHealth(cycle) ?? "-"}</b>
+      {cycleHealthState(cycle) && ` (${cycleHealthState(cycle)})`}
+    </div>
+    <div>
+      State: <b>{cycle.is_paused ? "Paused" : String(cycleState(cycle) ?? "-")}</b>
+    </div>
+    {String(cycleState(cycle)).toLowerCase() === "active" && !cycle.is_paused && (
+      <button
+        onClick={togglePause}
+        disabled={busy}
+        className="mt-3 w-full rounded-lg bg-gray-800 px-3 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:bg-gray-400"
+      >
+        ⏸ Pause
+      </button>
+    )}
+  </div>
+)}
+    {cycle &&
+  !["active", "paused"].includes(String(cycleState(cycle)).toLowerCase()) && (
+    <Link
+      to={`/farm/${cycleId}/debrief`}
+      className="absolute top-4 left-20 rounded-full bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:bg-green-700"
+    >
+      Cycle finished · See your debrief →
+    </Link>
+  )}
+      {cycle?.is_paused && (
+  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-[2px]">
+    <div className="text-5xl">⏸</div>
+    <h2 className="text-2xl font-bold text-white">Farm paused</h2>
+    <p className="text-sm text-white/80">Time is stopped. Your crops will wait for you.</p>
+    <button
+      onClick={togglePause}
+      disabled={busy}
+      className="mt-2 rounded-xl bg-green-600 px-8 py-3 font-semibold text-white shadow-lg hover:bg-green-700 disabled:bg-gray-400"
+    >
+      {busy ? "Resuming..." : "▶ Continue"}
+    </button>
+  </div>
+)}
       <EventToast />
       <ActionPanel />
     </div>

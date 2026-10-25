@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import "./index.css";
 import CreateCycle from "./components/CreateCycle";
 import FarmScreen from "./components/FarmScreen";
+import DebriefScreen from "./components/DebriefScreen";
 
 function CreateCycleRoute() {
   const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<CreateCycleRoute />} />
         <Route path="/farm/:cycleId" element={<FarmScreen />} />
+        <Route path="/farm/:cycleId/debrief" element={<DebriefScreen />} />
       </Routes>
     </BrowserRouter>
   );

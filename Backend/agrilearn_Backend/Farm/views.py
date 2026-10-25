@@ -18,8 +18,7 @@ from agrilearn_Backend.Farm.models import CycleDebrief, FarmCycle
 from agrilearn_Backend.Farm.services import finalize_if_time_up
 from agrilearn_Backend.Farm.debrief_facts import build_debrief_facts
 from agrilearn_Backend.Farm.debrief_ai import generate_debrief
-
-
+from .services import get_available_actions, submit_action, ActionRejected, pause_cycle, resume_cycle
 
 @api_view(['POST'])
 def create_cycle(request):
@@ -115,3 +114,21 @@ def cycle_debrief(request, cycle_id):
         'debrief': saved.content,
         'source': saved.source,
     })
+@api_view(['POST'])
+def pause_cycle_view(request, cycle_id):
+    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    try:
+        cycle = pause_cycle(cycle)
+    except ActionRejected as e:
+        return Response({'error': str(e)}, status=status.HTTP_409_CONFLICT)
+    return Response(FarmCycleStateSerializer(cycle).data)
+
+
+@api_view(['POST'])
+def resume_cycle_view(request, cycle_id):
+    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    try:
+        cycle = resume_cycle(cycle)
+    except ActionRejected as e:
+        return Response({'error': str(e)}, status=status.HTTP_409_CONFLICT)
+    return Response(FarmCycleStateSerializer(cycle).data)

@@ -1,6 +1,10 @@
 # all the functions
 from agrilearn_Backend.Farm.models import CropNutrientRequirement, Crops, CycleEVent, FertilizerOption, FertlizerNutrientContent, PlantingRequirement, PlotHealthLog, StageDefinition
 from django.utils import timezone
+from agrilearn_Backend.Farm.models import (CropNutrientRequirement, Crops, CycleEVent, FarmCycle,
+    FertilizerOption, FertlizerNutrientContent, PlantingRequirement, PlotHealthLog, StageDefinition)
+from django.db import transaction
+from django.utils import timezone
 
 
 def cropsAvailable():
@@ -22,7 +26,7 @@ def get_available_actions(cycle):
 
     result = []
     for stage in remaining:
-        if cycle.status != 'Active':
+        if cycle.status != 'Active'  or cycle.is_paused:
             enabled = False
         elif cycle.mode == 'Free':
             enabled = True
@@ -100,7 +104,31 @@ def compute_Current_virtual_day(cycle):
         active = min(active, duration_seconds(cycle))  # never runs past the chosen duration
     ratio = cycle.crop.real_world_duration_days / float(cycle.real_duration_hours)
     return (active / 3600) * ratio
+def pause_cycle(cycle):
+    with transaction.atomic():
+        cycle = FarmCycle.objects.select_for_update().get(pk=cycle.pk)
+        finalize_if_time_up(cycle)  # time may have just run out
+        if cycle.status != 'Active':
+            raise ActionRejected('Only a running cycle can be paused.')
+        if cycle.is_paused:
+            return cycle
+        freeze_clock(cycle)
+        cycle.save(update_fields=['accumulated_active_seconds', 'is_paused',
+                                  'current_segment_start'])
+    return cycle
 
+
+def resume_cycle(cycle):
+    with transaction.atomic():
+        cycle = FarmCycle.objects.select_for_update().get(pk=cycle.pk)
+        if cycle.status != 'Active':
+            raise ActionRejected('This cycle has ended and cannot be resumed.')
+        if not cycle.is_paused:
+            return cycle
+        cycle.is_paused = False
+        cycle.current_segment_start = timezone.now()
+        cycle.save(update_fields=['is_paused', 'current_segment_start'])
+    return cycle
 
 def freeze_clock(cycle, active_seconds=None):
     cycle.accumulated_active_seconds = int(
@@ -285,6 +313,8 @@ def submit_action(cycle, stage_id, fertilizer_name=None, application_rate=None,
     finalize_if_time_up(cycle)
     if cycle.status != 'Active':
         raise ActionRejected("This cycle has ended.")
+    if cycle.is_paused:
+        raise ActionRejected("The cycle is paused. Continue it first.")
 
     if not is_action_allowed(cycle, stage_id):
         raise ActionRejected("This action is not currently available.")

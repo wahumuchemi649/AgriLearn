@@ -21,7 +21,9 @@ export default function ActionPanel() {
   const cycle = useFarmStore((s) => s.cycle);
   const actions = useFarmStore((s) => s.actions);
   const busy = useFarmStore((s) => s.busy);
+  const pendingStageId = useFarmStore((s) => s.pendingStageId);
   const performAction = useFarmStore((s) => s.performAction);
+  const paused = useFarmStore((s) => Boolean(s.cycle?.is_paused));
 
   const [active, setActive] = useState(null); // stage awaiting input
   const [values, setValues] = useState({});
@@ -47,7 +49,8 @@ export default function ActionPanel() {
       extras[f.key] = f.type === "number" ? Number(raw) : raw;
     }
     await performAction(active, extras);
-    setActive(null);
+    // Keep the form open if the server rejected it, so nothing typed is lost
+    if (!useFarmStore.getState().error) setActive(null);
   }
 
   return (
@@ -72,11 +75,11 @@ export default function ActionPanel() {
           </div>
           <div className="flex gap-2">
             <button
-              disabled={busy}
+              disabled={busy || paused}
               onClick={handleSubmit}
               className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400"
             >
-              Confirm
+              {busy ? "Working..." : "Confirm"}
             </button>
             <button
               onClick={() => setActive(null)}
@@ -96,11 +99,11 @@ export default function ActionPanel() {
               {actions.map((a) => (
                 <button
                   key={stageId(a)}
-                  disabled={busy || !stageEnabled(a)}
+                  disabled={busy || paused || !stageEnabled(a)}
                   onClick={() => handleStageClick(a)}
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
-                  {stageName(a)}
+                  {pendingStageId === stageId(a) ? "Working..." : stageName(a)}
                 </button>
               ))}
             </div>
