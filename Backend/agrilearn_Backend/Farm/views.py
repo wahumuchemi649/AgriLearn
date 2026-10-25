@@ -10,6 +10,14 @@ from .services import get_available_actions,submit_action, ActionRejected
 from rest_framework.generics import get_object_or_404
 from .models import FarmCycle
 from .serializers import FarmCycleStateSerializer, SubmitActionSerializer
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from agrilearn_Backend.Farm.models import CycleDebrief, FarmCycle
+from agrilearn_Backend.Farm.services import finalize_if_time_up
+from agrilearn_Backend.Farm.debrief_facts import build_debrief_facts
+from agrilearn_Backend.Farm.debrief_ai import generate_debrief
 
 
 
@@ -67,3 +75,43 @@ def submit_cycle_action(request, cycle_id):
         'new_health_score': result['new_health_score'],
         'new_health_state': result['new_health_state'],
     }, status=status.HTTP_200_OK)
+from datetime import timedelta
+
+
+RETRY_TEMPLATE_AFTER = timedelta(minutes=10)
+@api_view(['GET'])
+def cycle_debrief(request, cycle_id):
+    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    finalize_if_time_up(cycle)  # a Guided cycle may have just run out of time
+
+    if cycle.status == 'Active':
+        return Response({'detail': 'This cycle is still running. The debrief is available once it ends.'},
+                        status=409)
+
+    saved = CycleDebrief.objects.filter(cycle=cycle).first()
+    stale_template = (saved and saved.source == 'template'
+                      and timezone.now() - saved.created_at > RETRY_TEMPLATE_AFTER)
+
+    if saved is None or stale_template:
+        facts = build_debrief_facts(cycle)
+        try:
+            content = generate_debrief(facts)
+        except ValueError as exc:  # facts don't match the health score
+            if saved is None:
+                return Response({'detail': str(exc)}, status=422)
+            content = None
+        if content is not None:
+            saved, _ = CycleDebrief.objects.update_or_create(
+                cycle=cycle,
+                defaults={'content': content, 'facts': facts, 'source': content['source']},
+            )
+
+    return Response({
+        'cycle_id': cycle.id,
+        'mode': cycle.mode,
+        'status': cycle.status,
+        'final_health': {'score': float(cycle.current_health_score),
+                         'state': cycle.current_health_state},
+        'debrief': saved.content,
+        'source': saved.source,
+    })

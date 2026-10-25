@@ -6,4 +6,5 @@ urlpatterns = [
     path('cycles/<int:cycle_id>/', views.cycle_state, name='cycle-state'),
     path('cycles/<int:cycle_id>/available-actions/', views.the_available_actions, name='available-actions'),
     path('cycles/<int:cycle_id>/actions/', views.submit_cycle_action, name='submit-action'),
+    path('cycles/<int:cycle_id>/debrief/', views.cycle_debrief),
 ]

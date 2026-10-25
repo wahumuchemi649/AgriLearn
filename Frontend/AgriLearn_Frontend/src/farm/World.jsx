@@ -45,78 +45,15 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-/* ---------- Sky + sun/moon + day-night cycle ---------- */
 function SkyAndLight() {
-  const cycle = useFarmStore((s) => s.cycle);
-  const dayNum = Number(cycle?.virtual_day);
-
-  // Time of day = the fractional part of virtual_day (x.25 sunrise, x.5 noon, x.75 sunset)
-  const target = useRef(0.42);
-  target.current = Number.isFinite(dayNum) ? dayNum - Math.floor(dayNum) : 0.42;
-  const tod = useRef(0.42);
-
-  const sun = useRef();
-  const hemi = useRef();
-  const top = useMemo(() => new THREE.Color(), []);
-  const bot = useMemo(() => new THREE.Color(), []);
-  const uniforms = useMemo(
-    () => ({
-      uTop: { value: new THREE.Color() },
-      uBottom: { value: new THREE.Color() },
-      uStars: { value: 0 },
-      uTime: { value: 0 },
-    }),
-    []
-  );
-
-  useFrame((state, dt) => {
-    // Move toward the target by the shortest way round the clock
-    const diff = ((target.current - tod.current + 1.5) % 1) - 0.5;
-    tod.current = (tod.current + diff * Math.min(1, dt * 1.5) + 1) % 1;
-
-    const a = (tod.current - 0.25) * Math.PI * 2;
-    const elev = Math.sin(a);
-    const day = THREE.MathUtils.smoothstep(elev, -0.08, 0.3);
-    const warm = Math.max(0, 1 - Math.abs(elev) / 0.45); // strongest at dawn/dusk
-    world.day = day;
-
-    top.copy(NIGHT_TOP).lerp(DAY_TOP, day).lerp(SUN_TOP, warm * 0.75);
-    bot.copy(NIGHT_BOT).lerp(DAY_BOT, day).lerp(SUN_BOT, warm * 0.85);
-    uniforms.uTop.value.copy(top);
-    uniforms.uBottom.value.copy(bot);
-    uniforms.uStars.value = 1 - day;
-    uniforms.uTime.value = state.clock.elapsedTime;
-
-    const s = sun.current;
-    if (s) {
-      // Never directly overhead, so shadows always have some length
-      s.position.set(Math.cos(a) * 12, Math.abs(elev) * 9 + 3, 5);
-      s.intensity = 0.3 + 1.2 * day;
-      s.color.copy(MOON).lerp(SUNLIGHT, day).lerp(SUNSET, warm * 0.7);
-    }
-    const h = hemi.current;
-    if (h) {
-      h.intensity = 0.2 + 0.55 * day;
-      h.color.copy(bot);
-    }
-  });
-
   return (
     <>
-      <mesh frustumCulled={false} renderOrder={-1000}>
-        <planeGeometry args={[2, 2]} />
-        <shaderMaterial
-          uniforms={uniforms}
-          vertexShader={VERT}
-          fragmentShader={FRAG}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
-
-      <hemisphereLight ref={hemi} groundColor="#3d3322" intensity={0.6} />
+      <color attach="background" args={["#bfe3ff"]} />
+      <hemisphereLight color="#dff0ff" groundColor="#4a3d2a" intensity={0.7} />
       <directionalLight
-        ref={sun}
+        position={[8, 10, 5]}
+        intensity={1.3}
+        color="#fff1d6"
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
@@ -132,7 +69,6 @@ function SkyAndLight() {
     </>
   );
 }
-
 /* ---------- Ground with a grass texture and a soil base ---------- */
 function Ground() {
   const tex = useMemo(() => {
@@ -362,7 +298,6 @@ export function World() {
       <Clouds />
       <Scenery />
       <Butterflies />
-      <Fireflies />
     </>
   );
 }

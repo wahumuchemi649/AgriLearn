@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'agrilearn_Backend.Farm',
     'agrilearn_Backend.Assessment',
     'agrilearn_Backend.Tutor',
+    'rest_framework',
 ]
 
 MIDDLEWARE = [

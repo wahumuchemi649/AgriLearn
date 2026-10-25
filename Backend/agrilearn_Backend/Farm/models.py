@@ -15,6 +15,7 @@ class StageDefinition(models.Model):
     earliest_virtual_date = models.IntegerField()# earliest the stage can be perfomed
     latest_virtual_date=models.IntegerField()# latest the stage can be perfomed
     is_optional = models.BooleanField(default=False)
+    timing_hint = models.CharField(max_length=200, blank=True, default="")
     action_type=models.CharField(max_length=50,default="OTHER",choices=[
          ("LAND_PREP","LAND_PREP" ),
          ("SEED_SELECTION","SEED_SELECTION"),
@@ -50,6 +51,7 @@ class PlotHealthLog(models.Model):
      health_score=models.DecimalField(max_digits=10, decimal_places=2) # the health score of the plot on that virtual day
      health_state=models.CharField(max_length=100, choices=[('Thriving', 'Thriving'), ('Healthy', 'Healthy'), ('Stressed','Stressed'),('Stunted', 'Stunted'),('Dead','Dead')]) # The state here will be determined by the health score, and will be used to determine if the cycle is failed or not
      stress_flags=models.JSONField() # a json field to store the stress flags for the plot on that virtual day
+     penalties = models.JSONField(default=list)
 
 class NutrientType(models.Model):
      name=models.CharField(max_length=100)
@@ -92,6 +94,9 @@ class PlantingRequirement(models.Model):
      max_seeds_per_hole=models.IntegerField()
      
      
-
-
-# Create your models here.
+class CycleDebrief(models.Model):
+    cycle = models.OneToOneField(FarmCycle, on_delete=models.CASCADE, related_name='debrief')
+    content = models.JSONField()   # summary, key_moments, went_well, improve, next_time
+    facts = models.JSONField()     # snapshot of what the AI was given, for auditing
+    source = models.CharField(max_length=20, choices=[('ai', 'ai'), ('template', 'template')])
+    created_at = models.DateTimeField(auto_now_add=True)
