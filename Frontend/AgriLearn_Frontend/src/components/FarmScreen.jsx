@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import * as THREE from "three";
+import { RoundedBox } from "@react-three/drei";
 import { useParams, Link } from "react-router-dom";
 import { useFarmStore, PLOT_SIZE } from "../farm/useFarmStore";
 import ActionPanel from "../farm/ActionPanel";
@@ -8,11 +9,11 @@ import { World } from "../farm/World";
 import { FieldBushes, Worker, MaizeField, Furrows, useFieldProgress } from "../farm/FieldVisuals";
 import { Particles, CameraRig, StageFx } from "../farm/Effects";
 import { sfx, isMuted, setMuted } from "../farm/sound";
-import { cycleHealth, cycleHealthState, cycleDay, cycleState } from "../api/farm";
+import { cycleHealth, cycleHealthState, cycleDay, cycleState, isPaused } from "../api/farm";
 
 
-const WEEDY = "#5f7f35";
-const SOIL = "#8b5a2b";
+const WEEDY = "#7db046";
+const SOIL = "#a0683a";
 
 function Plot({ id, position }) {
   const [hovered, setHovered] = useState(false);
@@ -41,8 +42,11 @@ function Plot({ id, position }) {
   }, []);
 
   return (
-    <mesh
+    <RoundedBox
       ref={mesh}
+      args={[PLOT_SIZE, 0.2, PLOT_SIZE]}
+      radius={0.06}
+      smoothness={3}
       position={position}
       receiveShadow
       castShadow
@@ -61,7 +65,6 @@ function Plot({ id, position }) {
         selectPlot(id);
       }}
     >
-      <boxGeometry args={[PLOT_SIZE, 0.2, PLOT_SIZE]} />
       <meshStandardMaterial
         ref={mat}
         color={initialColor}
@@ -69,7 +72,7 @@ function Plot({ id, position }) {
         emissiveIntensity={isSelected ? 0.55 : hovered ? 0.3 : 0}
       />
       {furrowed && <Furrows />}
-    </mesh>
+    </RoundedBox>
   );
 }
 
@@ -130,7 +133,7 @@ export default function FarmScene() {
       <Canvas
         orthographic
         shadows="percentage"
-        frameloop={cycle?.is_paused ? "never" : "always"}
+        frameloop={isPaused(cycle) ? "never" : "always"}
         camera={{ near: 0.1, far: 1000 }}
         onPointerMissed={clearSelection}
        >
@@ -177,9 +180,9 @@ export default function FarmScene() {
       {cycleHealthState(cycle) && ` (${cycleHealthState(cycle)})`}
     </div>
     <div>
-      State: <b>{cycle.is_paused ? "Paused" : String(cycleState(cycle) ?? "-")}</b>
+      State: <b>{isPaused(cycle) ? "Paused" : String(cycleState(cycle) ?? "-")}</b>
     </div>
-    {String(cycleState(cycle)).toLowerCase() === "active" && !cycle.is_paused && (
+    {String(cycleState(cycle)).toLowerCase() === "active" && !isPaused(cycle) && (
       <button
         onClick={togglePause}
         disabled={busy}

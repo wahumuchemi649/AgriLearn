@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createCycle } from "../api/farm";
+import videoSrc from "../videos/How_AgriLearn_Simulates_a_Maize_Cycle.mp4";
 
 const MAIZE_ID = 1; // hardcoded test crop, replace with a crop picker later
 const TEST_STUDENT_ID = 1; // hardcoded test student for now
@@ -35,7 +36,32 @@ function OptionCard({ selected, onClick, children }) {
     </button>
   );
 }
+function BackgroundVideo() {
+  const ref = useRef(null);
 
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    v.muted = true;
+    v.play().catch(() => {});
+  }, []);
+
+  return (
+    <div className="absolute inset-0 -z-10 overflow-hidden bg-black" aria-hidden="true">
+      <video
+        ref={ref}
+        className="h-full w-full object-cover"
+        src={videoSrc}
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="auto"
+      />
+      <div className="absolute inset-0 bg-black/40" />
+    </div>
+  );
+}
 export default function CreateCycle({ onCreated }) {
   const [mode, setMode] = useState("Guided");
   const [hours, setHours] = useState(2);
@@ -68,11 +94,12 @@ export default function CreateCycle({ onCreated }) {
   }
 
   return (
-    <div className="min-h-screen bg-green-50 flex items-center justify-center p-4">
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-lg bg-white rounded-2xl shadow-lg p-6 sm:p-8 space-y-7"
-      >
+   <div className="relative isolate min-h-screen flex items-center justify-center p-4">
+  <BackgroundVideo />
+  <form
+    onSubmit={handleSubmit}
+    className="w-full max-w-lg bg-white/95 backdrop-blur rounded-2xl shadow-2xl p-6 sm:p-8 space-y-7"
+  >
         <header className="flex items-center gap-3">
           <div className="text-4xl" aria-hidden="true">🌽</div>
           <div>

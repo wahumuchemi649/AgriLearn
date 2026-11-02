@@ -102,11 +102,13 @@ export function Particles() {
 // Fixed isometric camera, plus screen shake for impact
 export function CameraRig() {
   const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
 
+  // 60 on a big screen; smaller screens zoom out so the whole island stays visible
   useLayoutEffect(() => {
-    camera.zoom = 60;
+    camera.zoom = Math.min(60, size.height / 15.5, size.width / 17.5);
     camera.updateProjectionMatrix();
-  }, [camera]);
+  }, [camera, size.width, size.height]);
 
   useFrame((_, dt) => {
     fx.shake = Math.max(0, fx.shake - dt * 2.2);

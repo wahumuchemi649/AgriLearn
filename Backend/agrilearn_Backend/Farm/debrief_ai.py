@@ -13,9 +13,13 @@ The AI never scores anything. It only explains the facts. If the API is unavaila
 or returns something unusable, the template fallback builds the same JSON shape
 from the same facts, so the student always gets a debrief (and it works offline).
 
-Setup:  pip install anthropic
-        ANTHROPIC_API_KEY=...   in Backend/.env (loaded into the environment)
-        DEBRIEF_MODEL=...       optional, defaults to claude-sonnet-5-5
+Setup:  pip install google-genai
+        GEMINI_API_KEY=...      in Backend/.env (loaded into the environment)
+        DEBRIEF_MODEL=...       optional, defaults to gemini-3.8-flash (check the ID in AI Studio)
+
+Privacy: Gemini's free tier may use prompts for product improvement and human review.
+         The facts payload must stay anonymous: never add student names, emails,
+         school names or user ids to build_debrief_facts().
 """
 import json
 import logging
@@ -24,7 +28,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-DEBRIEF_MODEL = os.environ.get('DEBRIEF_MODEL', 'claude-sonnet-5-5')
+DEBRIEF_MODEL = os.environ.get('DEBRIEF_MODEL', 'gemini-3.8-flash')
 
 # --------------------------------------------------------------------------
 # Prompt
@@ -75,20 +79,43 @@ def build_user_message(facts):
 
 
 # --------------------------------------------------------------------------
-# Claude call (patch _call_claude in tests)
+# Model call (patch _call_llm in tests)
 # --------------------------------------------------------------------------
 
-def _call_claude(facts):
-    import anthropic  # imported here so the fallback works without the package
+class NoApiKey(Exception):
+    """Raised when no Gemini API key can be found."""
 
-    client = anthropic.Anthropic(timeout=30.0, max_retries=1)  # reads ANTHROPIC_API_KEY
-    response = client.messages.create(
+
+def _get_api_key():
+    key = os.environ.get('GEMINI_API_KEY')
+    if key:
+        return key
+    try:
+        from django.conf import settings
+        return getattr(settings, 'GEMINI_API_KEY', None) or None
+    except Exception:
+        return None
+
+
+def _call_llm(facts):
+    from google import genai  # imported here so the fallback works without the package
+    from google.genai import types
+
+    api_key = _get_api_key()
+    if not api_key:
+        raise NoApiKey('GEMINI_API_KEY is not set')
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=30_000))  # ms
+    response = client.models.generate_content(
         model=DEBRIEF_MODEL,
-        max_tokens=1500,
-        system=SYSTEM_PROMPT,
-        messages=[{'role': 'user', 'content': build_user_message(facts)}],
+        contents=build_user_message(facts),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type='application/json',
+            temperature=0.3,
+            max_output_tokens=4096,   # headroom in case the model spends tokens thinking
+        ),
     )
-    return ''.join(block.text for block in response.content if block.type == 'text')
+    return response.text or ''
 
 
 def _parse(text):
@@ -258,15 +285,21 @@ def generate_debrief(facts):
     if not facts.get('reconciles', False):
         raise ValueError('Facts do not reconcile with the cycle health score; not generating a debrief.')
 
+    reason = 'validation_failed'
     try:
-        data = _parse(_call_claude(facts))
+        data = _parse(_call_llm(facts))
         if _is_valid(data, facts):
             data['source'] = 'ai'
             return data
         logger.warning('Debrief JSON failed validation; using template.')
-    except Exception:
+    except NoApiKey:
+        reason = 'no_api_key'
+        logger.warning('No GEMINI_API_KEY found; using template.')
+    except Exception as exc:
+        reason = type(exc).__name__   # e.g. AuthenticationError, APIConnectionError, NotFoundError
         logger.exception('Debrief AI call failed; using template.')
 
     data = build_fallback_debrief(facts)
     data['source'] = 'template'
+    data['fallback_reason'] = reason
     return data

@@ -35,7 +35,7 @@ export function useFieldProgress() {
 
 /* ---------- The clearing crew: a worker sweeps the field ---------- */
 const ROUTE = [
-  [-6.5, -2.7], [3.6, -2.7], [3.6, -0.9], [-3.6, -0.9],
+  [-5.3, -2.7], [3.6, -2.7], [3.6, -0.9], [-3.6, -0.9],
   [-3.6, 0.9], [3.6, 0.9], [3.6, 2.7], [-3.6, 2.7],
 ];
 const SPEED = 9; // units per second
@@ -144,16 +144,16 @@ function Bush({ position, size, clearAt, seed, instantGone }) {
       </mesh>
       <group ref={g} position={position}>
         <mesh position={[0, 0.25, 0]} castShadow>
-          <icosahedronGeometry args={[0.32, 0]} />
-          <meshStandardMaterial color="#2f6b2a" flatShading />
+          <icosahedronGeometry args={[0.32, 2]} />
+          <meshStandardMaterial color="#2f6b2a" roughness={0.9} />
         </mesh>
         <mesh position={[0.22, 0.18, 0.1]} castShadow>
-          <icosahedronGeometry args={[0.24, 0]} />
-          <meshStandardMaterial color="#3b7d33" flatShading />
+          <icosahedronGeometry args={[0.24, 2]} />
+          <meshStandardMaterial color="#3b7d33" roughness={0.9} />
         </mesh>
         <mesh position={[-0.2, 0.15, -0.12]} castShadow>
-          <icosahedronGeometry args={[0.22, 0]} />
-          <meshStandardMaterial color="#27581f" flatShading />
+          <icosahedronGeometry args={[0.22, 2]} />
+          <meshStandardMaterial color="#27581f" roughness={0.9} />
         </mesh>
       </group>
     </>
@@ -298,15 +298,36 @@ export function Worker() {
   );
 }
 
-/* ---------- Furrows (child of a Plot mesh) ---------- */
+/* ---------- Furrows and seed holes (child of a Plot mesh) ---------- */
+// Plants sit at +-PLANT_OFFSET, so the two rows and the four holes line up with them.
+export const PLANT_OFFSET = 0.38;
+
 export function Furrows() {
+  const spots = [
+    [-PLANT_OFFSET, -PLANT_OFFSET],
+    [PLANT_OFFSET, -PLANT_OFFSET],
+    [-PLANT_OFFSET, PLANT_OFFSET],
+    [PLANT_OFFSET, PLANT_OFFSET],
+  ];
   return (
     <>
-      {[-0.5, 0, 0.5].map((z) => (
-        <mesh key={z} position={[0, 0.105, z]}>
-          <boxGeometry args={[PLOT_SIZE * 0.9, 0.025, 0.14]} />
-          <meshStandardMaterial color="#4a2c12" />
+      {[-PLANT_OFFSET, PLANT_OFFSET].map((z) => (
+        <mesh key={z} position={[0, 0.104, z]}>
+          <boxGeometry args={[PLOT_SIZE * 0.9, 0.02, 0.2]} />
+          <meshStandardMaterial color="#6b4120" roughness={1} />
         </mesh>
+      ))}
+      {spots.map(([x, z]) => (
+        <group key={`${x}:${z}`} position={[x, 0.112, z]}>
+          <mesh>
+            <cylinderGeometry args={[0.085, 0.085, 0.02, 14]} />
+            <meshStandardMaterial color="#2f1a0b" roughness={1} />
+          </mesh>
+          <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.006, 0]}>
+            <torusGeometry args={[0.1, 0.028, 8, 16]} />
+            <meshStandardMaterial color="#b9824a" roughness={1} />
+          </mesh>
+        </group>
       ))}
     </>
   );
@@ -316,12 +337,69 @@ export function Furrows() {
 const GREEN = new THREE.Color("#4fae3a");
 const GOLD = new THREE.Color("#d9b030");
 const DRY = new THREE.Color("#7a5a30");
+const HUSK_GREEN = new THREE.Color("#7ccc4a");
+const HUSK_STRAW = new THREE.Color("#d9c57c");
+const TASSEL = new THREE.Color("#e4cb62");
+
+// Leaf colour by health. The stops follow the five states in the engine:
+// 85+ Thriving, 65+ Healthy, 40+ Stressed, 15+ Stunted, below 15 Dead.
+const HEALTH_STOPS = [
+  [0.0, new THREE.Color("#6b5232")],
+  [0.15, new THREE.Color("#a67c3a")],
+  [0.4, new THREE.Color("#cdbb3a")],
+  [0.65, new THREE.Color("#86c03a")],
+  [0.85, new THREE.Color("#4fae3a")],
+  [1.0, new THREE.Color("#4fae3a")],
+];
+function healthColor(h, out) {
+  const x = clamp01(h);
+  for (let i = 1; i < HEALTH_STOPS.length; i++) {
+    const [h1, c1] = HEALTH_STOPS[i];
+    if (x <= h1) {
+      const [h0, c0] = HEALTH_STOPS[i - 1];
+      return out.copy(c0).lerp(c1, (x - h0) / (h1 - h0));
+    }
+  }
+  return out.copy(GREEN);
+}
 
 const easeOutBack = (x) => {
   const c1 = 1.70158;
   const c3 = c1 + 1;
   return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 };
+
+const LEAVES = 6;
+const MAX_HEIGHT = 1.7;
+const PLANT_SPOTS = [[-PLANT_OFFSET, -PLANT_OFFSET], [PLANT_OFFSET, -PLANT_OFFSET], [-PLANT_OFFSET, PLANT_OFFSET], [PLANT_OFFSET, PLANT_OFFSET]];
+
+// One shared leaf: a tapered ribbon with a centre fold, arching along +x.
+let leafGeo = null;
+function getLeafGeo() {
+  if (leafGeo) return leafGeo;
+  const L = 0.62;
+  const N = 8;
+  const pos = [];
+  const idx = [];
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    const w = 0.1 * Math.pow(Math.sin(Math.PI * Math.min(1, 0.12 + u * 0.88)), 0.7);
+    const x = u * L;
+    const y = L * (0.22 * u - 0.55 * u * u);
+    pos.push(x, y, -w / 2, x, y + 0.014, 0, x, y, w / 2);
+  }
+  for (let i = 0; i < N; i++) {
+    const a = i * 3;
+    const b = (i + 1) * 3;
+    idx.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  leafGeo = g;
+  return g;
+}
 
 function MaizePlant({ x, z, growth, health, seed, delay, instant, mats }) {
   const root = useRef();
@@ -330,11 +408,23 @@ function MaizePlant({ x, z, growth, health, seed, delay, instant, mats }) {
   const stalk = useRef();
   const mound = useRef();
   const tassel = useRef();
-  const cob = useRef();
   const leaves = useRef([]);
+  const cobs = useRef([]);
+  const kernels = useRef([]);
   const shown = useRef(instant ? growth : 0);
   const clock = useRef(0);
   const landed = useRef(instant);
+  const geo = useMemo(getLeafGeo, []);
+
+  // Fixed look for this plant: spiral of leaves, a little size variation
+  const look = useMemo(
+    () =>
+      Array.from({ length: LEAVES }, (_, i) => ({
+        yaw: i * 2.4 + rand(seed) * 6.28,
+        size: (0.72 + 0.28 * Math.sin((Math.PI * (i + 0.5)) / LEAVES)) * (0.9 + rand(seed + i) * 0.2),
+      })),
+    [seed]
+  );
 
   useFrame((state, dt) => {
     clock.current += dt;
@@ -365,40 +455,54 @@ function MaizePlant({ x, z, growth, health, seed, delay, instant, mats }) {
       Math.max(pop * (1 - 0.25 * wob), 0.0001)
     );
 
-    // 3. Slow growth, never a snap
+    // 3. Slow growth, never a snap. A struggling plant stays shorter (stunted).
     shown.current += (growth - shown.current) * Math.min(1, dt * 1.2);
     const s = shown.current;
-    const H = 1.1 * (0.12 + 0.95 * s);
+    const stunt = 0.55 + 0.45 * THREE.MathUtils.smoothstep(health, 0.1, 0.85);
+    const H = MAX_HEIGHT * (0.12 + 0.95 * s) * stunt;
 
-    stalk.current.scale.y = H / 1.1;
+    stalk.current.scale.y = H;
     stalk.current.position.y = H / 2;
 
     const mk = Math.max(1 - s / 0.3, 0.0001);
     mound.current.visible = s < 0.3;
     mound.current.scale.set(mk, 0.4 * mk, mk);
 
+    // Leaves open from the bottom up. They arch up when healthy and hang when not.
+    const tilt = 0.55 - (1 - health) * 1.2;
     leaves.current.forEach((lf, i) => {
       if (!lf) return;
-      const k = clamp01((s - (0.06 + i * 0.14)) / 0.15);
+      const k = clamp01((s - (0.04 + i * 0.11)) / 0.12);
       lf.visible = k > 0;
-      lf.scale.setScalar(Math.max(k, 0.0001));
-      lf.position.y = H * (0.28 + i * 0.2);
+      lf.scale.setScalar(Math.max(k, 0.0001) * look[i].size);
+      lf.position.y = H * (0.2 + i * 0.11);
+      lf.rotation.set(0, look[i].yaw, tilt);
     });
+
+    const ripe = THREE.MathUtils.smoothstep(s, 0.75, 1);
 
     const tk = clamp01((s - 0.6) / 0.2);
     tassel.current.visible = tk > 0;
     tassel.current.scale.setScalar(Math.max(tk, 0.0001));
-    tassel.current.position.y = H + 0.1;
+    tassel.current.position.y = H + 0.02;
 
-    const ck = clamp01((s - 0.78) / 0.15);
-    cob.current.visible = ck > 0;
-    cob.current.scale.setScalar(Math.max(ck, 0.0001));
-    cob.current.position.y = H * 0.55;
+    const ck = clamp01((s - 0.7) / 0.15);
+    cobs.current.forEach((cb, j) => {
+      if (!cb) return;
+      cb.visible = ck > 0;
+      cb.scale.setScalar(Math.max(ck, 0.0001) * (j === 0 ? 1 : 0.8));
+      cb.position.y = H * (0.5 - j * 0.12);
+      const kn = kernels.current[j];
+      if (kn) {
+        kn.visible = ripe > 0.02;
+        kn.scale.setScalar(Math.max(ripe * (0.4 + 0.6 * health), 0.0001));
+      }
+    });
 
-    // 4. Wind, breathing, and drooping when unhealthy
+    // 4. Wind, breathing, and leaning over when unhealthy
     const t = state.clock.elapsedTime;
     root.current.rotation.z =
-      Math.sin(t * 1.4 + seed) * 0.035 * (0.3 + s) + (1 - health) * 0.5 * clamp01(s * 3);
+      Math.sin(t * 1.4 + seed) * 0.035 * (0.3 + s) + (1 - health) * 0.6 * clamp01(s * 3);
     root.current.scale.setScalar(1 + Math.sin(t * 1.8 + seed) * 0.012);
   });
 
@@ -410,32 +514,44 @@ function MaizePlant({ x, z, growth, health, seed, delay, instant, mats }) {
 
       <group ref={inner} visible={false}>
         <mesh ref={mound} position={[0, 0.03, 0]} material={mats.mound}>
-          <sphereGeometry args={[0.17, 10, 6]} />
+          <sphereGeometry args={[0.17, 12, 8]} />
         </mesh>
         <mesh ref={stalk} material={mats.stalk} castShadow>
-          <cylinderGeometry args={[0.035, 0.05, 1.1, 6]} />
+          <cylinderGeometry args={[0.03, 0.05, 1, 8]} />
         </mesh>
-        {[0, 1, 2, 3].map((i) => (
-          <group
-            key={i}
-            ref={(el) => (leaves.current[i] = el)}
-            rotation={[0, i * 1.9 + 0.4, 0]}
-            scale={0.0001}
-          >
-            <mesh position={[0.26, 0, 0]} rotation={[0, 0, 0.5]} material={mats.leaf} castShadow>
-              <boxGeometry args={[0.52, 0.02, 0.12]} />
-            </mesh>
-            <mesh position={[-0.26, 0, 0]} rotation={[0, 0, -0.5]} material={mats.leaf} castShadow>
-              <boxGeometry args={[0.52, 0.02, 0.12]} />
-            </mesh>
+
+        {look.map((_, i) => (
+          <group key={i} ref={(el) => (leaves.current[i] = el)} scale={0.0001}>
+            <mesh geometry={geo} material={mats.leaf} position-x={0.03} castShadow />
           </group>
         ))}
-        <mesh ref={tassel} material={mats.cob} scale={0.0001}>
-          <coneGeometry args={[0.05, 0.28, 6]} />
-        </mesh>
-        <mesh ref={cob} position-x={0.09} rotation={[0, 0, -0.3]} material={mats.cob} castShadow scale={0.0001}>
-          <cylinderGeometry args={[0.07, 0.05, 0.28, 8]} />
-        </mesh>
+
+        {[0, 1].map((j) => (
+          <group key={j} ref={(el) => (cobs.current[j] = el)} rotation={[0, look[j * 3].yaw, 0]} scale={0.0001}>
+            <group position={[0.085, 0.1, 0]} rotation={[0, 0, -0.35]}>
+              <mesh material={mats.husk} castShadow>
+                <capsuleGeometry args={[0.05, 0.17, 4, 10]} />
+              </mesh>
+              <mesh ref={(el) => (kernels.current[j] = el)} material={mats.kernel} position={[0, 0.15, 0]} scale={0.0001}>
+                <sphereGeometry args={[0.046, 10, 8]} />
+              </mesh>
+            </group>
+          </group>
+        ))}
+
+        {/* tassel: a centre spike and three splayed branches */}
+        <group ref={tassel} scale={0.0001}>
+          <mesh position={[0, 0.15, 0]} material={mats.tassel}>
+            <coneGeometry args={[0.02, 0.3, 6]} />
+          </mesh>
+          {[0, 1, 2].map((i) => (
+            <group key={i} rotation={[0, i * 2.094 + 0.4, 0.55]}>
+              <mesh position={[0, 0.12, 0]} material={mats.tassel}>
+                <coneGeometry args={[0.015, 0.24, 5]} />
+              </mesh>
+            </group>
+          ))}
+        </group>
       </group>
     </group>
   );
@@ -483,32 +599,43 @@ export function MaizeField() {
 
   const mats = useMemo(
     () => ({
-      leaf: new THREE.MeshStandardMaterial({ color: GREEN }),
-      stalk: new THREE.MeshStandardMaterial({ color: GREEN }),
-      cob: new THREE.MeshStandardMaterial({ color: "#e8c547" }),
-      mound: new THREE.MeshStandardMaterial({ color: "#6b4423" }),
+      leaf: new THREE.MeshStandardMaterial({ color: GREEN, side: THREE.DoubleSide, roughness: 0.8 }),
+      stalk: new THREE.MeshStandardMaterial({ color: GREEN, roughness: 0.9 }),
+      husk: new THREE.MeshStandardMaterial({ color: HUSK_GREEN, roughness: 0.9 }),
+      kernel: new THREE.MeshStandardMaterial({ color: "#f2c230", roughness: 0.6 }),
+      tassel: new THREE.MeshStandardMaterial({ color: TASSEL, roughness: 0.9 }),
+      mound: new THREE.MeshStandardMaterial({ color: "#6b4423", roughness: 1 }),
       seed: new THREE.MeshStandardMaterial({ color: "#7a4a22" }),
     }),
     []
   );
   const target = useMemo(() => new THREE.Color(), []);
+  const tmp = useMemo(() => new THREE.Color(), []);
 
   useFrame((_, dt) => {
+    const k = Math.min(1, dt * 2);
     const ripe = THREE.MathUtils.smoothstep(growth, 0.75, 1);
-    target.copy(GREEN).lerp(GOLD, ripe).lerp(DRY, (1 - health) * 0.7);
-    mats.leaf.color.lerp(target, Math.min(1, dt * 2));
+
+    // Healthy plants ripen to gold; struggling ones stay yellow or brown
+    healthColor(health, target).lerp(GOLD, ripe * (0.25 + 0.75 * health));
+    mats.leaf.color.lerp(target, k);
     mats.stalk.color.copy(mats.leaf.color).multiplyScalar(0.85);
+
+    tmp.copy(HUSK_GREEN).lerp(HUSK_STRAW, ripe).lerp(DRY, (1 - health) * 0.6);
+    mats.husk.color.lerp(tmp, k);
+    tmp.copy(TASSEL).lerp(DRY, (1 - health) * 0.8);
+    mats.tassel.color.lerp(tmp, k);
   });
 
   const plants = useMemo(
     () =>
       plots.flatMap((p) =>
-        [[-0.38, -0.38], [0.38, -0.38], [-0.38, 0.38], [0.38, 0.38]].map(([dx, dz], k) => {
+        PLANT_SPOTS.map(([dx, dz], k) => {
           const seed = p.id * 4 + k + 500;
           return {
             seed,
-            x: p.position[0] + dx + (rand(seed) - 0.5) * 0.15,
-            z: p.position[2] + dz + (rand(seed + 1) - 0.5) * 0.15,
+            x: p.position[0] + dx + (rand(seed) - 0.5) * 0.05,
+            z: p.position[2] + dz + (rand(seed + 1) - 0.5) * 0.05,
             // a diagonal wave across the field
             delay: ((p.id % 4) + Math.floor(p.id / 4)) * 0.14 + rand(seed + 3) * 0.35 + 0.1,
           };
