@@ -21,4 +21,5 @@ from django.urls import include, path
 urlpatterns = [
     path("admin/", admin.site.urls),
     path('api/farm/', include('agrilearn_Backend.Farm.urls')),
+    path('api/', include('agrilearn_Backend.Assessment.urls'))
 ]

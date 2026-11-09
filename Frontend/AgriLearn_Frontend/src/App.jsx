@@ -4,6 +4,8 @@ import "./index.css";
 import CreateCycle from "./components/CreateCycle";
 import FarmScreen from "./components/FarmScreen";
 import DebriefScreen from "./components/DebriefScreen";
+import AuthScreen from "./components/AuthScreen";
+import RequireAuth from "./components/Requireauth";
 
 function CreateCycleRoute() {
   const navigate = useNavigate();
@@ -18,9 +20,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<CreateCycleRoute />} />
-        <Route path="/farm/:cycleId" element={<FarmScreen />} />
-        <Route path="/farm/:cycleId/debrief" element={<DebriefScreen />} />
+         <Route path="/" element={<RequireAuth><CreateCycleRoute /></RequireAuth>} />
+         <Route path="/farm/:cycleId" element={<RequireAuth><FarmScreen /></RequireAuth>} />
+         <Route path="/farm/:cycleId/debrief" element={<RequireAuth><DebriefScreen /></RequireAuth>} />
+         <Route path="/login" element={<AuthScreen />} />
+         <Route path="/signup" element={<AuthScreen />} />
       </Routes>
     </BrowserRouter>
   );

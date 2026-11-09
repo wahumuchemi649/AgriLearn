@@ -18,6 +18,13 @@ import environ
 
 env = environ.Env()
 environ.Env.read_env(BASE_DIR / '.env')
+REST_FRAMEWORK = {
+    # ...keep everything you already have...
+    "DEFAULT_THROTTLE_RATES": {
+        "login": "120/min",
+        "register": "30/hour",
+    },
+}
 
 
 # Quick-start development settings - unsuitable for production
@@ -47,6 +54,7 @@ INSTALLED_APPS = [
     'agrilearn_Backend.Assessment',
     'agrilearn_Backend.Tutor',
     'rest_framework',
+    'rest_framework_simplejwt', 
 ]
 
 MIDDLEWARE = [

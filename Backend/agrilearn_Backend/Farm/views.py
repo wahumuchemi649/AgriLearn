@@ -20,35 +20,71 @@ from agrilearn_Backend.Farm.debrief_facts import build_debrief_facts
 from agrilearn_Backend.Farm.debrief_ai import generate_debrief
 from .services import get_available_actions, submit_action, ActionRejected, pause_cycle, resume_cycle
 
+from django.http import Http404
+from rest_framework.decorators import authentication_classes, permission_classes
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from agrilearn_Backend.Assessment.accounts import (
+    CYCLE_GROUP_FIELD,
+    CYCLE_STUDENT_FIELD,
+    cycles_visible_to,
+    get_actor,
+    owner_fields_for_new_cycle,
+)
+from agrilearn_Backend.Assessment.permissions import IsKnownUser, IsPlayer
+
+
+def _cycle_for(request, cycle_id):
+    """The cycle, but only if this person may see it. Anyone else gets a 404,
+    so cycle ids cannot be probed."""
+    cycle = cycles_visible_to(get_actor(request), FarmCycle.objects.filter(id=cycle_id)).first()
+    if cycle is None:
+        raise Http404
+    return cycle
+
+
 @api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsPlayer])
 def create_cycle(request):
-    serializer = CreateFarmCycleSerializer(data=request.data)
+    owner = owner_fields_for_new_cycle(get_actor(request))
+    data = {k: v for k, v in request.data.items()}
+    data["owner_type"] = owner["owner_type"]
+    data[CYCLE_STUDENT_FIELD] = owner[CYCLE_STUDENT_FIELD].id if CYCLE_STUDENT_FIELD in owner else None
+    data[CYCLE_GROUP_FIELD] = owner[CYCLE_GROUP_FIELD].id if CYCLE_GROUP_FIELD in owner else None
+    serializer = CreateFarmCycleSerializer(data=data)
     if serializer.is_valid():
         cycle = serializer.save(
             Current_virtual_day=0,
             current_segment_start=timezone.now(),
+            **owner,
         )
         return Response(CreateFarmCycleSerializer(cycle).data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsKnownUser])
 def cycle_state(request, cycle_id):
-    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    cycle = _cycle_for(request, cycle_id)
     serializer = FarmCycleStateSerializer(cycle)
     return Response(serializer.data)
 
 
 @api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsKnownUser])
 def the_available_actions(request, cycle_id):
-    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    cycle = _cycle_for(request, cycle_id)
     actions = get_available_actions(cycle)
     serializer = AvailableActionSerializer(actions, many=True)
     return Response(serializer.data)
 
 @api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsPlayer])
 def submit_cycle_action(request, cycle_id):
-    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    cycle = _cycle_for(request, cycle_id)
     serializer = SubmitActionSerializer(data=request.data)
 
     if not serializer.is_valid():
@@ -79,8 +115,10 @@ from datetime import timedelta
 
 RETRY_TEMPLATE_AFTER = timedelta(minutes=10)
 @api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsKnownUser])
 def cycle_debrief(request, cycle_id):
-    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    cycle = _cycle_for(request, cycle_id)
     finalize_if_time_up(cycle)  # a Guided cycle may have just run out of time
 
     if cycle.status == 'Active':
@@ -115,8 +153,10 @@ def cycle_debrief(request, cycle_id):
         'source': saved.source,
     })
 @api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsPlayer])
 def pause_cycle_view(request, cycle_id):
-    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    cycle = _cycle_for(request, cycle_id)
     try:
         cycle = pause_cycle(cycle)
     except ActionRejected as e:
@@ -125,8 +165,10 @@ def pause_cycle_view(request, cycle_id):
 
 
 @api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsPlayer])
 def resume_cycle_view(request, cycle_id):
-    cycle = get_object_or_404(FarmCycle, id=cycle_id)
+    cycle = _cycle_for(request, cycle_id)
     try:
         cycle = resume_cycle(cycle)
     except ActionRejected as e:
