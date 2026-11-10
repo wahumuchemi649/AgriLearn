@@ -12,8 +12,9 @@ class SyllabusChunk(models.Model):
     stage=models.ForeignKey(StageDefinition, on_delete=models.CASCADE)
     
 class TutorConversation(models.Model):
-    user=models.ForeignKey(UserProfile, on_delete=models.CASCADE)
-    cycle=models.ForeignKey(FarmCycle, on_delete=models.CASCADE)
-    question=models.TextField()
-    answer=models.TextField()
-    timestamp=models.DateTimeField(auto_now_add=True)
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, null=True, blank=True)
+    group = models.ForeignKey("Assessment.Groups", on_delete=models.CASCADE, null=True, blank=True)
+    cycle = models.ForeignKey(FarmCycle, on_delete=models.CASCADE, null=True, blank=True)
+    question = models.TextField()
+    answer = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)

@@ -10,6 +10,9 @@ import { FieldBushes, Worker, MaizeField, Furrows, useFieldProgress } from "../f
 import { Particles, CameraRig, StageFx } from "../farm/Effects";
 import { sfx, isMuted, setMuted } from "../farm/sound";
 import { cycleHealth, cycleHealthState, cycleDay, cycleState, isPaused } from "../api/farm";
+import TutorDrawer from "./TutorDrawer";
+
+
 
 
 const WEEDY = "#7db046";
@@ -218,6 +221,7 @@ export default function FarmScene() {
 )}
       <EventToast />
       <ActionPanel />
+      <TutorDrawer cycleId={cycle.id} />
     </div>
   );
 }

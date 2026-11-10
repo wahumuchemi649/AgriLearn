@@ -23,6 +23,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": "120/min",
         "register": "30/hour",
+        "tutor": "60/min",
     },
 }
 

@@ -1,0 +1,110 @@
+[
+  {
+    "crop": "Maize",
+    "stage_order": 1,
+    "topic": "Maize: bush clearing",
+    "content": "Bush clearing removes trees, shrubs and tall grass from the land before planting maize. This gives the maize sunlight and space, and stops other plants from taking its water and food. Clearing also makes it easier to move around and work on the field."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 2,
+    "topic": "Maize: primary cultivation",
+    "content": "Primary cultivation is the first digging or ploughing of the cleared land. It breaks up hard soil and buries weeds and old plant material. Loose soil lets water soak in and lets maize roots go deep."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 3,
+    "topic": "Maize: secondary cultivation",
+    "content": "Secondary cultivation is the second, finer working of the soil after primary cultivation. It breaks big lumps into a fine seedbed. A fine seedbed helps seeds touch the soil well, so they take in water and germinate evenly."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 4,
+    "topic": "Maize: soil testing",
+    "content": "Soil testing shows how acidic the soil is and which nutrients it has or lacks. A farmer uses the results to decide what fertiliser or lime the field needs. Testing first avoids wasting money on fertiliser the soil does not need."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 5,
+    "topic": "Maize: seed selection",
+    "content": "Seed selection means choosing a maize variety that suits the area's rainfall and temperature. Good seed is clean, healthy and not damaged or mouldy. The right seed gives strong germination and a better harvest."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 6,
+    "topic": "Maize: land marking and spacing",
+    "content": "Land marking sets out the rows and the distance between plants before planting. Maize plants need room. If they are too close, they compete for light, water and food and grow weak. If they are too far apart, the farmer wastes land."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 7,
+    "topic": "Maize: planting and seeds per hole",
+    "content": "Maize seeds are planted in holes at the right depth, when the soil is moist enough for them to germinate. Too many seeds in one hole makes the seedlings crowd each other. Too few can leave gaps in the field."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 8,
+    "topic": "Maize: fertiliser application at planting",
+    "content": "A planting fertiliser gives the young maize a good start. Nutrients such as phosphorus help roots grow strong. The fertiliser should be placed so it does not touch the seed directly, because it can burn the seedling."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 9,
+    "topic": "Maize: thinning and gapping",
+    "content": "Gapping means replacing seeds that did not come up so the field has no empty spaces. Thinning means removing extra seedlings from a crowded hole. Both give every plant enough room, so the field grows evenly."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 10,
+    "topic": "Maize: first weeding",
+    "content": "The first weeding removes weeds while the maize is still small. Weeds grow fast and take water, light and nutrients from young maize. Weeding early protects the crop when it is most easily harmed."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 11,
+    "topic": "Maize: top dressing",
+    "content": "Top dressing means adding fertiliser to maize that is already growing. Fertilisers such as CAN and urea give nitrogen, which helps leaves grow green and strong. Too little leaves the plant hungry. Too much can harm it and wastes money."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 12,
+    "topic": "Maize: second weeding",
+    "content": "The second weeding removes weeds that grew after the first one. It keeps the field clean while the maize is growing fast and needs a lot of food and water. A clean field also makes it harder for pests and diseases to hide."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 13,
+    "topic": "Maize: pest and disease control",
+    "content": "Pests and diseases damage leaves, stems and cobs, and lower the harvest. A farmer checks the field often and acts early when something is found. Keeping the field clean and healthy also helps the maize resist problems."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 14,
+    "topic": "Maize: maturity",
+    "content": "Maize is mature when the leaves and husks dry and the kernels become hard. Harvesting too early gives soft grain that spoils easily. Waiting for maturity gives better quality grain."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 15,
+    "topic": "Maize: harvesting",
+    "content": "Harvesting means picking the mature cobs from the plants. It should be done in dry weather, because wet cobs can grow mould. Careful harvesting reduces losses and protects the quality of the grain."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 16,
+    "topic": "Maize: drying",
+    "content": "After harvest, cobs and grain are dried so they hold less water. Wet grain grows mould and can become unsafe to eat. Drying well is what lets grain be stored safely."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 17,
+    "topic": "Maize: shelling",
+    "content": "Shelling means removing the kernels from the dry cob. It is done after drying, because dry kernels come off more easily and are less likely to break. Clean, whole grain stores better and sells for more."
+  },
+  {
+    "crop": "Maize",
+    "stage_order": 18,
+    "topic": "Maize: storage",
+    "content": "Dry maize is stored in a clean, dry, well-ventilated place that is protected from rain, rats and insects such as weevils. Damp or dirty stores spoil the grain. Good storage keeps the harvest safe until it is eaten or sold."
+  }
+]
