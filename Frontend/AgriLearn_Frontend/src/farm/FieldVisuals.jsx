@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useFarmStore, PLOT_SIZE } from "./useFarmStore";
@@ -7,8 +7,8 @@ import { emit, addShake } from "./Effects";
 import { sfx } from "./sound";
 import { getMaizeStageModels } from "./maizeStageModels";
 
-// Virtual days from planting to full maturity. Set this to maize's real value.
-const GROW_DAYS = 120;
+// Target harvest day in the simulation calendar (~120–130 virtual days)
+const HARVEST_DAY = 122;
 
 const rand = (seed) => {
   const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
@@ -24,14 +24,35 @@ export function useFieldProgress() {
   return useMemo(() => {
     const remaining = actions.map((a) => String(stageName(a)).toLowerCase());
     const pending = (key) => remaining.some((n) => n.includes(key));
+    const planted = loaded && !pending("planting");
+
+    // Agronomic stage growth floor so visual crop stage always matches the active farming step:
+    // - After Planting / Basal Fertiliser: Stage 1 Seedling (0.08 - 0.24)
+    // - After Thinning / First Weeding (entering Top Dressing): Stage 2 Knee-High Whorl (0.32 - 0.54)
+    // - After Top Dressing / Second Weeding: Stage 3 Tasseling & Silking (0.64 - 0.78)
+    // - After Pest Control / Maturity Check (entering Harvesting+): Stage 4 Mature Golden-Brown (0.88 - 0.98)
+    let stageGrowthFloor = 0;
+    if (planted) {
+      stageGrowthFloor = 0.08;
+      if (!pending("basal")) stageGrowthFloor = 0.16;
+      if (!pending("thinning")) stageGrowthFloor = 0.32;
+      if (!pending("first weeding")) stageGrowthFloor = 0.46;
+      if (!pending("top dressing")) stageGrowthFloor = 0.65;
+      if (!pending("second weeding")) stageGrowthFloor = 0.75;
+      if (!pending("pest")) stageGrowthFloor = 0.88;
+      if (!pending("maturity")) stageGrowthFloor = 0.96;
+      if (!pending("harvest")) stageGrowthFloor = 1.0;
+    }
+
     return {
       loaded,
       cleared: loaded && !pending("bush"),
       tilled: loaded && !pending("primary"),
       furrowed: loaded && !pending("secondary"),
-      planted: loaded && !pending("planting"),
+      planted,
       fertilized: loaded && (!pending("basal") || !pending("top dressing")),
       weeded: loaded && !pending("first weeding"),
+      stageGrowthFloor,
     };
   }, [loaded, actions]);
 }
@@ -343,7 +364,7 @@ export function Furrows() {
    Stage 4: Mature / Harvest    (s: 0.82 – 1.00, Days 98–120+)
    ------------------------------------------------------------ */
 const GREEN = new THREE.Color("#4fae3a");
-const GOLD = new THREE.Color("#d9b030");
+const GOLD = new THREE.Color("#c89328"); // warm golden-brown harvest senescence
 const DRY = new THREE.Color("#8a683a");
 const WHITE = new THREE.Color("#ffffff");
 
@@ -443,7 +464,7 @@ function getStageScales(s) {
 
 export function MaizeField() {
   const loaded = useFarmStore((s) => s.loaded);
-  const { planted } = useFieldProgress();
+  const { planted, stageGrowthFloor } = useFieldProgress();
   const plots = useFarmStore((s) => s.plots);
   const cycle = useFarmStore((s) => s.cycle);
   const plantedDay = useFarmStore((s) => s.plantedDay);
@@ -453,8 +474,12 @@ export function MaizeField() {
   const hp = Number(cycle?.current_health_score);
   const health = Number.isFinite(hp) ? clamp01(hp / 100) : 1;
 
-  const growth =
-    plantedDay === null || !Number.isFinite(day) ? 0 : clamp01((day - plantedDay) / GROW_DAYS);
+  // Combine virtual-day progression toward HARVEST_DAY (~122) with the agronomic stage floor
+  // so the 3D maize stage always matches the active farming step (Seedling -> Whorl -> Tasseling -> Mature)
+  const effectivePlantedDay = plantedDay !== null ? plantedDay : Math.min(Number.isFinite(day) ? day : 20, 20);
+  const daySpan = Math.max(40, HARVEST_DAY - effectivePlantedDay);
+  const dayGrowth = !Number.isFinite(day) ? 0 : clamp01((day - effectivePlantedDay) / daySpan);
+  const growth = planted ? clamp01(Math.max(dayGrowth, stageGrowthFloor)) : 0;
 
   // Animate the planting seed-drop wave only if planting happens live while watching
   const [animate, setAnimate] = useState(false);
@@ -549,6 +574,31 @@ export function MaizeField() {
   const instanceLeafColor = useMemo(() => new THREE.Color(), []);
   const instanceAccentColor = useMemo(() => new THREE.Color(), []);
 
+  // Pre-initialize instanceColor on all 8 stage InstancedMeshes BEFORE Frame 0 compiles WebGL shaders
+  // so Three.js always enables USE_INSTANCING_COLOR for health and golden-brown ripening tints.
+  useLayoutEffect(() => {
+    if (!planted || !plants.length) return;
+    const allMeshes = [
+      seedlingFolRef.current,
+      seedlingAccRef.current,
+      vegFolRef.current,
+      vegAccRef.current,
+      tasselFolRef.current,
+      tasselAccRef.current,
+      matureFolRef.current,
+      matureAccRef.current,
+    ];
+    allMeshes.forEach((m) => {
+      if (!m) return;
+      for (let i = 0; i < plants.length; i++) {
+        m.setColorAt(i, WHITE);
+      }
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    });
+    mats.foliage.needsUpdate = true;
+    mats.accent.needsUpdate = true;
+  }, [planted, plants, mats]);
+
   useFrame((state, dt) => {
     if (!planted) return;
     maizeWindUniform.value = state.clock.elapsedTime;
@@ -628,8 +678,8 @@ export function MaizeField() {
       ];
 
       // 5. Compute plant foliage color (health + golden ripening in mature stage + per-plant HSL jitter)
-      const ripe = THREE.MathUtils.smoothstep(s, 0.76, 1.0);
-      healthColor(health, baseLeafColor).lerp(GOLD, ripe * (0.3 + 0.7 * health));
+      const ripe = THREE.MathUtils.smoothstep(s, 0.72, 0.96);
+      healthColor(health, baseLeafColor).lerp(GOLD, ripe * (0.45 + 0.55 * health));
       instanceLeafColor.copy(baseLeafColor).offsetHSL(pl.hueShift, 0, pl.lightShift);
       instanceAccentColor.copy(WHITE).lerp(DRY, (1 - health) * 0.55);
 
