@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
+import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useFarmStore } from "./useFarmStore";
 import { sfx } from "./sound";
@@ -99,29 +100,84 @@ export function Particles() {
   );
 }
 
-// Fixed isometric camera, plus screen shake for impact
+// Perspective camera presets:
+// - "overview": elevated diorama angle (~46° above ground) showing the entire island
+// - "field": closer, low-angle field view (~30° above ground: atan2(4.5, 7.8) ≈ 30°)
+const CAMERA_VIEWS = {
+  overview: {
+    pos: new THREE.Vector3(10.2, 10.6, 10.2),
+    target: new THREE.Vector3(0, 0.25, 0),
+  },
+  field: {
+    pos: new THREE.Vector3(5.5, 4.5, 5.5),
+    target: new THREE.Vector3(0, 0.55, 0),
+  },
+};
+
 export function CameraRig() {
   const camera = useThree((s) => s.camera);
-  const size = useThree((s) => s.size);
+  const controlsRef = useRef(null);
+  const cameraView = useFarmStore((s) => s.cameraView);
+  const transitioning = useRef(false);
+  const desiredPos = useRef(CAMERA_VIEWS.overview.pos.clone());
+  const desiredTarget = useRef(CAMERA_VIEWS.overview.target.clone());
 
-  // 60 on a big screen; smaller screens zoom out so the whole island stays visible
-  useLayoutEffect(() => {
-    camera.zoom = Math.min(60, size.height / 15.5, size.width / 17.5);
-    camera.updateProjectionMatrix();
-  }, [camera, size.width, size.height]);
+  // Start a smooth glide whenever the user switches between Overview and Field view
+  useEffect(() => {
+    const preset = CAMERA_VIEWS[cameraView] ?? CAMERA_VIEWS.overview;
+    desiredPos.current.copy(preset.pos);
+    desiredTarget.current.copy(preset.target);
+    transitioning.current = true;
+  }, [cameraView]);
 
   useFrame((_, dt) => {
-    fx.shake = Math.max(0, fx.shake - dt * 2.2);
-    const s = fx.shake * fx.shake;
-    camera.position.set(
-      10 + (Math.random() - 0.5) * s * 0.5,
-      10 + (Math.random() - 0.5) * s * 0.5,
-      10
-    );
-    camera.lookAt(1.5, 0, 1.5);
+    const ctrl = controlsRef.current;
+    const step = Math.min(1, dt * 6);
+
+    if (transitioning.current && ctrl) {
+      camera.position.lerp(desiredPos.current, step);
+      ctrl.target.lerp(desiredTarget.current, step);
+      if (
+        camera.position.distanceTo(desiredPos.current) < 0.05 &&
+        ctrl.target.distanceTo(desiredTarget.current) < 0.03
+      ) {
+        transitioning.current = false;
+      }
+    }
+
+    // Screen shake for chopping/digging impact
+    if (fx.shake > 0) {
+      fx.shake = Math.max(0, fx.shake - dt * 2.2);
+      const s = fx.shake * fx.shake * 0.12;
+      camera.position.x += (Math.random() - 0.5) * s;
+      camera.position.y = Math.max(1.2, camera.position.y + (Math.random() - 0.5) * s);
+    }
+
+    // Clamp target inside the farm bed so panning can't lose the island
+    if (ctrl) {
+      ctrl.target.x = THREE.MathUtils.clamp(ctrl.target.x, -3.5, 3.5);
+      ctrl.target.y = THREE.MathUtils.clamp(ctrl.target.y, 0.1, 1.8);
+      ctrl.target.z = THREE.MathUtils.clamp(ctrl.target.z, -3.5, 3.5);
+      ctrl.update();
+    }
   });
 
-  return null;
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      makeDefault
+      enableDamping
+      dampingFactor={0.08}
+      minDistance={5.5}
+      maxDistance={22}
+      minPolarAngle={Math.PI * 0.12} // ~21° from top-down zenith
+      maxPolarAngle={Math.PI * 0.42} // ~14° above horizon — never goes under the ground
+      onStart={() => {
+        // Cancel preset glide if the student drags the camera manually
+        transitioning.current = false;
+      }}
+    />
+  );
 }
 
 // Reacts to a completed stage with the right effect and sound

@@ -50,6 +50,7 @@ function savePlantedDay(id, day) {
 export const useFarmStore = create((set, get) => ({
   plots: createPlots(),
   selectedPlotId: null,
+  cameraView: "overview", // "overview" | "field"
 
   cycleId: null,
   cycle: null,
@@ -64,6 +65,8 @@ export const useFarmStore = create((set, get) => ({
   selectPlot: (id) =>
     set((s) => ({ selectedPlotId: s.selectedPlotId === id ? null : id })),
   clearSelection: () => set({ selectedPlotId: null }),
+  clearError: () => set({ error: null }),
+  setCameraView: (view) => set({ cameraView: view }),
 
   setPlantedDay: (day) => {
     const { cycleId } = get();

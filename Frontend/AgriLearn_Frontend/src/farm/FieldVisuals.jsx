@@ -5,6 +5,7 @@ import { useFarmStore, PLOT_SIZE } from "./useFarmStore";
 import { stageName } from "../api/farm";
 import { emit, addShake } from "./Effects";
 import { sfx } from "./sound";
+import { getMaizeStageModels } from "./maizeStageModels";
 
 // Virtual days from planting to full maturity. Set this to maize's real value.
 const GROW_DAYS = 120;
@@ -29,6 +30,8 @@ export function useFieldProgress() {
       tilled: loaded && !pending("primary"),
       furrowed: loaded && !pending("secondary"),
       planted: loaded && !pending("planting"),
+      fertilized: loaded && (!pending("basal") || !pending("top dressing")),
+      weeded: loaded && !pending("first weeding"),
     };
   }, [loaded, actions]);
 }
@@ -333,13 +336,16 @@ export function Furrows() {
   );
 }
 
-/* ---------- Maize: seed drop, pop, then growth stages ---------- */
+/* ---------- Maize: Instanced 4-Stage Growth Meshes ----------
+   Stage 1: Seedling            (s: 0.00 – 0.25, Days 0–30)
+   Stage 2: Vegetative / Whorl  (s: 0.25 – 0.58, Days 30–70, knee-high weeding & top-dressing)
+   Stage 3: Tasseling & Silking (s: 0.58 – 0.82, Days 70–98)
+   Stage 4: Mature / Harvest    (s: 0.82 – 1.00, Days 98–120+)
+   ------------------------------------------------------------ */
 const GREEN = new THREE.Color("#4fae3a");
 const GOLD = new THREE.Color("#d9b030");
-const DRY = new THREE.Color("#7a5a30");
-const HUSK_GREEN = new THREE.Color("#7ccc4a");
-const HUSK_STRAW = new THREE.Color("#d9c57c");
-const TASSEL = new THREE.Color("#e4cb62");
+const DRY = new THREE.Color("#8a683a");
+const WHITE = new THREE.Color("#ffffff");
 
 // Leaf colour by health. The stops follow the five states in the engine:
 // 85+ Thriving, 65+ Healthy, 40+ Stressed, 15+ Stunted, below 15 Dead.
@@ -369,192 +375,70 @@ const easeOutBack = (x) => {
   return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
 };
 
-const LEAVES = 6;
-const MAX_HEIGHT = 1.7;
-const PLANT_SPOTS = [[-PLANT_OFFSET, -PLANT_OFFSET], [PLANT_OFFSET, -PLANT_OFFSET], [-PLANT_OFFSET, PLANT_OFFSET], [PLANT_OFFSET, PLANT_OFFSET]];
+const PLANT_SPOTS = [
+  [-PLANT_OFFSET, -PLANT_OFFSET],
+  [PLANT_OFFSET, -PLANT_OFFSET],
+  [-PLANT_OFFSET, PLANT_OFFSET],
+  [PLANT_OFFSET, PLANT_OFFSET],
+];
 
-// One shared leaf: a tapered ribbon with a centre fold, arching along +x.
-let leafGeo = null;
-function getLeafGeo() {
-  if (leafGeo) return leafGeo;
-  const L = 0.62;
-  const N = 8;
-  const pos = [];
-  const idx = [];
-  for (let i = 0; i <= N; i++) {
-    const u = i / N;
-    const w = 0.1 * Math.pow(Math.sin(Math.PI * Math.min(1, 0.12 + u * 0.88)), 0.7);
-    const x = u * L;
-    const y = L * (0.22 * u - 0.55 * u * u);
-    pos.push(x, y, -w / 2, x, y + 0.014, 0, x, y, w / 2);
-  }
-  for (let i = 0; i < N; i++) {
-    const a = i * 3;
-    const b = (i + 1) * 3;
-    idx.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  leafGeo = g;
-  return g;
+// Shared wind time uniform for instanced maize canopies
+const maizeWindUniform = { value: 0 };
+
+function makeMaizeInstancedMaterial(roughness = 0.82) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: "#ffffff",
+    vertexColors: true,
+    flatShading: true,
+    side: THREE.DoubleSide,
+    roughness,
+  });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = maizeWindUniform;
+    shader.vertexShader =
+      `uniform float uTime;\n` +
+      shader.vertexShader.replace(
+        "#include <project_vertex>",
+        `
+        vec4 wp = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          wp = instanceMatrix * wp;
+        #endif
+        // Height-weighted wind sway so stalks stay anchored at soil level (y = 0.2)
+        float hWeight = clamp((wp.y - 0.2) / 1.4, 0.0, 1.4);
+        float phase = wp.x * 1.3 + wp.z * 1.1;
+        float sway = sin(uTime * 1.8 + phase) + 0.35 * cos(uTime * 3.1 - phase * 1.4);
+        transformed.x += sway * 0.032 * hWeight * hWeight;
+        transformed.z += sway * 0.022 * hWeight * hWeight;
+        #include <project_vertex>
+        `
+      );
+  };
+  return mat;
 }
 
-function MaizePlant({ x, z, growth, health, seed, delay, instant, mats }) {
-  const root = useRef();
-  const inner = useRef();
-  const seedMesh = useRef();
-  const stalk = useRef();
-  const mound = useRef();
-  const tassel = useRef();
-  const leaves = useRef([]);
-  const cobs = useRef([]);
-  const kernels = useRef([]);
-  const shown = useRef(instant ? growth : 0);
-  const clock = useRef(0);
-  const landed = useRef(instant);
-  const geo = useMemo(getLeafGeo, []);
+// Compute smooth per-stage scale weights for a plant at growth progress s in [0, 1]
+function getStageScales(s) {
+  // Smooth overlap bands (+/- 0.035) around thresholds 0.25, 0.58, 0.82 so stage swaps never pop
+  const fadeOutSeedling = 1 - THREE.MathUtils.smoothstep(s, 0.215, 0.285);
+  const fadeInVeg = THREE.MathUtils.smoothstep(s, 0.215, 0.285);
+  const fadeOutVeg = 1 - THREE.MathUtils.smoothstep(s, 0.545, 0.615);
+  const fadeInTassel = THREE.MathUtils.smoothstep(s, 0.545, 0.615);
+  const fadeOutTassel = 1 - THREE.MathUtils.smoothstep(s, 0.785, 0.855);
+  const fadeInMature = THREE.MathUtils.smoothstep(s, 0.785, 0.855);
 
-  // Fixed look for this plant: spiral of leaves, a little size variation
-  const look = useMemo(
-    () =>
-      Array.from({ length: LEAVES }, (_, i) => ({
-        yaw: i * 2.4 + rand(seed) * 6.28,
-        size: (0.72 + 0.28 * Math.sin((Math.PI * (i + 0.5)) / LEAVES)) * (0.9 + rand(seed + i) * 0.2),
-      })),
-    [seed]
-  );
+  // Within each stage, the plant also grows progressively taller/fuller
+  const seedlingGrowth = 0.68 + 0.44 * clamp01(s / 0.25);
+  const vegGrowth = 0.8 + 0.32 * clamp01((s - 0.22) / 0.36);
+  const tasselGrowth = 0.92 + 0.16 * clamp01((s - 0.55) / 0.27);
+  const matureGrowth = 0.98 + 0.08 * clamp01((s - 0.79) / 0.21);
 
-  useFrame((state, dt) => {
-    clock.current += dt;
-    const c = clock.current - delay;
-    const kDrop = instant ? 1 : clamp01(c / 0.5);
-    const kPop = instant ? 1 : clamp01((c - 0.5) / 0.7);
-
-    // 1. The seed falls from the sky
-    if (seedMesh.current) {
-      seedMesh.current.visible = !instant && c > 0 && kDrop < 1;
-      seedMesh.current.position.y = 3.2 * (1 - kDrop * kDrop);
-    }
-    if (kDrop >= 1 && !landed.current) {
-      landed.current = true;
-      emit({
-        x, z, y: 0.25, count: 7, spread: 0.1, speed: 1, up: 1.6, size: 0.06, life: 0.6,
-        colors: ["#6b4423", "#8b5a2b"],
-      });
-    }
-
-    // 2. The plant pops up with squash and stretch
-    const pop = kPop <= 0 ? 0 : easeOutBack(kPop);
-    const wob = Math.sin(kPop * Math.PI * 3) * (1 - kPop);
-    inner.current.visible = kPop > 0;
-    inner.current.scale.set(
-      Math.max(pop * (1 - 0.25 * wob), 0.0001),
-      Math.max(pop * (1 + 0.35 * wob), 0.0001),
-      Math.max(pop * (1 - 0.25 * wob), 0.0001)
-    );
-
-    // 3. Slow growth, never a snap. A struggling plant stays shorter (stunted).
-    shown.current += (growth - shown.current) * Math.min(1, dt * 1.2);
-    const s = shown.current;
-    const stunt = 0.55 + 0.45 * THREE.MathUtils.smoothstep(health, 0.1, 0.85);
-    const H = MAX_HEIGHT * (0.12 + 0.95 * s) * stunt;
-
-    stalk.current.scale.y = H;
-    stalk.current.position.y = H / 2;
-
-    const mk = Math.max(1 - s / 0.3, 0.0001);
-    mound.current.visible = s < 0.3;
-    mound.current.scale.set(mk, 0.4 * mk, mk);
-
-    // Leaves open from the bottom up. They arch up when healthy and hang when not.
-    const tilt = 0.55 - (1 - health) * 1.2;
-    leaves.current.forEach((lf, i) => {
-      if (!lf) return;
-      const k = clamp01((s - (0.04 + i * 0.11)) / 0.12);
-      lf.visible = k > 0;
-      lf.scale.setScalar(Math.max(k, 0.0001) * look[i].size);
-      lf.position.y = H * (0.2 + i * 0.11);
-      lf.rotation.set(0, look[i].yaw, tilt);
-    });
-
-    const ripe = THREE.MathUtils.smoothstep(s, 0.75, 1);
-
-    const tk = clamp01((s - 0.6) / 0.2);
-    tassel.current.visible = tk > 0;
-    tassel.current.scale.setScalar(Math.max(tk, 0.0001));
-    tassel.current.position.y = H + 0.02;
-
-    const ck = clamp01((s - 0.7) / 0.15);
-    cobs.current.forEach((cb, j) => {
-      if (!cb) return;
-      cb.visible = ck > 0;
-      cb.scale.setScalar(Math.max(ck, 0.0001) * (j === 0 ? 1 : 0.8));
-      cb.position.y = H * (0.5 - j * 0.12);
-      const kn = kernels.current[j];
-      if (kn) {
-        kn.visible = ripe > 0.02;
-        kn.scale.setScalar(Math.max(ripe * (0.4 + 0.6 * health), 0.0001));
-      }
-    });
-
-    // 4. Wind, breathing, and leaning over when unhealthy
-    const t = state.clock.elapsedTime;
-    root.current.rotation.z =
-      Math.sin(t * 1.4 + seed) * 0.035 * (0.3 + s) + (1 - health) * 0.6 * clamp01(s * 3);
-    root.current.scale.setScalar(1 + Math.sin(t * 1.8 + seed) * 0.012);
-  });
-
-  return (
-    <group ref={root} position={[x, 0.2, z]}>
-      <mesh ref={seedMesh} material={mats.seed} visible={false}>
-        <sphereGeometry args={[0.07, 8, 8]} />
-      </mesh>
-
-      <group ref={inner} visible={false}>
-        <mesh ref={mound} position={[0, 0.03, 0]} material={mats.mound}>
-          <sphereGeometry args={[0.17, 12, 8]} />
-        </mesh>
-        <mesh ref={stalk} material={mats.stalk} castShadow>
-          <cylinderGeometry args={[0.03, 0.05, 1, 8]} />
-        </mesh>
-
-        {look.map((_, i) => (
-          <group key={i} ref={(el) => (leaves.current[i] = el)} scale={0.0001}>
-            <mesh geometry={geo} material={mats.leaf} position-x={0.03} castShadow />
-          </group>
-        ))}
-
-        {[0, 1].map((j) => (
-          <group key={j} ref={(el) => (cobs.current[j] = el)} rotation={[0, look[j * 3].yaw, 0]} scale={0.0001}>
-            <group position={[0.085, 0.1, 0]} rotation={[0, 0, -0.35]}>
-              <mesh material={mats.husk} castShadow>
-                <capsuleGeometry args={[0.05, 0.17, 4, 10]} />
-              </mesh>
-              <mesh ref={(el) => (kernels.current[j] = el)} material={mats.kernel} position={[0, 0.15, 0]} scale={0.0001}>
-                <sphereGeometry args={[0.046, 10, 8]} />
-              </mesh>
-            </group>
-          </group>
-        ))}
-
-        {/* tassel: a centre spike and three splayed branches */}
-        <group ref={tassel} scale={0.0001}>
-          <mesh position={[0, 0.15, 0]} material={mats.tassel}>
-            <coneGeometry args={[0.02, 0.3, 6]} />
-          </mesh>
-          {[0, 1, 2].map((i) => (
-            <group key={i} rotation={[0, i * 2.094 + 0.4, 0.55]}>
-              <mesh position={[0, 0.12, 0]} material={mats.tassel}>
-                <coneGeometry args={[0.015, 0.24, 5]} />
-              </mesh>
-            </group>
-          ))}
-        </group>
-      </group>
-    </group>
-  );
+  return {
+    seedling: fadeOutSeedling * seedlingGrowth,
+    vegetative: fadeInVeg * fadeOutVeg * vegGrowth,
+    tasseling: fadeInTassel * fadeOutTassel * tasselGrowth,
+    mature: fadeInMature * matureGrowth,
+  };
 }
 
 export function MaizeField() {
@@ -572,7 +456,7 @@ export function MaizeField() {
   const growth =
     plantedDay === null || !Number.isFinite(day) ? 0 : clamp01((day - plantedDay) / GROW_DAYS);
 
-  // Animate the planting only if it happens while you are watching
+  // Animate the planting seed-drop wave only if planting happens live while watching
   const [animate, setAnimate] = useState(false);
   const initial = useRef(null);
   useEffect(() => {
@@ -597,36 +481,19 @@ export function MaizeField() {
     if (planted && plantedDay === null && Number.isFinite(day)) setPlantedDay(day);
   }, [planted, plantedDay, day, setPlantedDay]);
 
+  const stageModels = useMemo(() => getMaizeStageModels(), []);
+  const seedGeo = useMemo(() => new THREE.SphereGeometry(0.065, 8, 8), []);
+
   const mats = useMemo(
     () => ({
-      leaf: new THREE.MeshStandardMaterial({ color: GREEN, side: THREE.DoubleSide, roughness: 0.8 }),
-      stalk: new THREE.MeshStandardMaterial({ color: GREEN, roughness: 0.9 }),
-      husk: new THREE.MeshStandardMaterial({ color: HUSK_GREEN, roughness: 0.9 }),
-      kernel: new THREE.MeshStandardMaterial({ color: "#f2c230", roughness: 0.6 }),
-      tassel: new THREE.MeshStandardMaterial({ color: TASSEL, roughness: 0.9 }),
-      mound: new THREE.MeshStandardMaterial({ color: "#6b4423", roughness: 1 }),
-      seed: new THREE.MeshStandardMaterial({ color: "#7a4a22" }),
+      foliage: makeMaizeInstancedMaterial(0.8),
+      accent: makeMaizeInstancedMaterial(0.86),
+      seed: new THREE.MeshStandardMaterial({ color: "#8a5322", roughness: 0.85 }),
     }),
     []
   );
-  const target = useMemo(() => new THREE.Color(), []);
-  const tmp = useMemo(() => new THREE.Color(), []);
 
-  useFrame((_, dt) => {
-    const k = Math.min(1, dt * 2);
-    const ripe = THREE.MathUtils.smoothstep(growth, 0.75, 1);
-
-    // Healthy plants ripen to gold; struggling ones stay yellow or brown
-    healthColor(health, target).lerp(GOLD, ripe * (0.25 + 0.75 * health));
-    mats.leaf.color.lerp(target, k);
-    mats.stalk.color.copy(mats.leaf.color).multiplyScalar(0.85);
-
-    tmp.copy(HUSK_GREEN).lerp(HUSK_STRAW, ripe).lerp(DRY, (1 - health) * 0.6);
-    mats.husk.color.lerp(tmp, k);
-    tmp.copy(TASSEL).lerp(DRY, (1 - health) * 0.8);
-    mats.tassel.color.lerp(tmp, k);
-  });
-
+  // 64 plant descriptors (4 per plot across the 16 plots)
   const plants = useMemo(
     () =>
       plots.flatMap((p) =>
@@ -636,7 +503,11 @@ export function MaizeField() {
             seed,
             x: p.position[0] + dx + (rand(seed) - 0.5) * 0.05,
             z: p.position[2] + dz + (rand(seed + 1) - 0.5) * 0.05,
-            // a diagonal wave across the field
+            yaw: rand(seed + 2) * Math.PI * 2,
+            scaleJitter: 0.92 + rand(seed + 4) * 0.16,
+            hueShift: (rand(seed + 5) - 0.5) * 0.03,
+            lightShift: (rand(seed + 6) - 0.5) * 0.06,
+            // Diagonal planting wave across the field
             delay: ((p.id % 4) + Math.floor(p.id / 4)) * 0.14 + rand(seed + 3) * 0.35 + 0.1,
           };
         })
@@ -644,18 +515,237 @@ export function MaizeField() {
     [plots]
   );
 
-  if (!planted) return null;
-  return plants.map((pl) => (
-    <MaizePlant
-      key={pl.seed}
-      x={pl.x}
-      z={pl.z}
-      seed={pl.seed}
-      delay={pl.delay}
-      growth={growth}
-      health={health}
-      instant={!animate}
-      mats={mats}
-    />
-  ));
+  // Per-plant runtime state for smooth growth interpolation & seed landing tracking
+  const runtimeRef = useRef({
+    clock: 0,
+    shown: [],
+    landed: [],
+    initialized: false,
+  });
+
+  // Reset runtime state whenever planting state or animation mode changes
+  useEffect(() => {
+    const rt = runtimeRef.current;
+    rt.clock = 0;
+    rt.shown = plants.map(() => (animate ? 0 : growth));
+    rt.landed = plants.map(() => !animate);
+    rt.initialized = true;
+  }, [plants, animate, planted]);
+
+  // InstancedMesh refs for the 4 stages (foliage + accent) and falling seeds
+  const seedRef = useRef();
+  const seedlingFolRef = useRef();
+  const seedlingAccRef = useRef();
+  const vegFolRef = useRef();
+  const vegAccRef = useRef();
+  const tasselFolRef = useRef();
+  const tasselAccRef = useRef();
+  const matureFolRef = useRef();
+  const matureAccRef = useRef();
+
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const seedDummy = useMemo(() => new THREE.Object3D(), []);
+  const baseLeafColor = useMemo(() => new THREE.Color(), []);
+  const instanceLeafColor = useMemo(() => new THREE.Color(), []);
+  const instanceAccentColor = useMemo(() => new THREE.Color(), []);
+
+  useFrame((state, dt) => {
+    if (!planted) return;
+    maizeWindUniform.value = state.clock.elapsedTime;
+
+    const rt = runtimeRef.current;
+    if (!rt.initialized || rt.shown.length !== plants.length) {
+      rt.shown = plants.map(() => (!animate ? growth : 0));
+      rt.landed = plants.map(() => !animate);
+      rt.initialized = true;
+    }
+
+    rt.clock += Math.min(dt, 0.05);
+    const instant = !animate;
+    const stunt = 0.58 + 0.42 * THREE.MathUtils.smoothstep(health, 0.1, 0.85);
+    const stressLean = (1 - health) * 0.42;
+
+    const stagePairs = [
+      [seedlingFolRef.current, seedlingAccRef.current],
+      [vegFolRef.current, vegAccRef.current],
+      [tasselFolRef.current, tasselAccRef.current],
+      [matureFolRef.current, matureAccRef.current],
+    ];
+
+    for (let i = 0; i < plants.length; i++) {
+      const pl = plants[i];
+      const c = rt.clock - pl.delay;
+      const kDrop = instant ? 1 : clamp01(c / 0.5);
+      const kPop = instant ? 1 : clamp01((c - 0.5) / 0.7);
+
+      // 1. Seed falling from the sky during live planting
+      if (seedRef.current) {
+        const showSeed = !instant && c > 0 && kDrop < 1;
+        if (showSeed) {
+          seedDummy.position.set(pl.x, 0.2 + 3.2 * (1 - kDrop * kDrop), pl.z);
+          seedDummy.scale.setScalar(1);
+        } else {
+          seedDummy.position.set(pl.x, -10, pl.z);
+          seedDummy.scale.setScalar(0.0001);
+        }
+        seedDummy.updateMatrix();
+        seedRef.current.setMatrixAt(i, seedDummy.matrix);
+      }
+
+      if (kDrop >= 1 && !rt.landed[i]) {
+        rt.landed[i] = true;
+        emit({
+          x: pl.x,
+          z: pl.z,
+          y: 0.25,
+          count: 7,
+          spread: 0.1,
+          speed: 1,
+          up: 1.6,
+          size: 0.06,
+          life: 0.6,
+          colors: ["#6b4423", "#8b5a2b"],
+        });
+      }
+
+      // 2. Smooth growth progression per plant
+      rt.shown[i] += (growth - rt.shown[i]) * Math.min(1, dt * 1.4);
+      const s = rt.shown[i];
+
+      // 3. Squash & stretch pop-in envelope
+      const pop = kPop <= 0 ? 0 : easeOutBack(kPop);
+      const wob = Math.sin(kPop * Math.PI * 3) * (1 - kPop);
+      const popXZ = Math.max(pop * (1 - 0.22 * wob), 0);
+      const popY = Math.max(pop * (1 + 0.32 * wob), 0);
+
+      // 4. Compute stage weights for Seedling, Vegetative, Tasseling, and Mature
+      const weights = getStageScales(s);
+      const stageScaleList = [
+        weights.seedling,
+        weights.vegetative,
+        weights.tasseling,
+        weights.mature,
+      ];
+
+      // 5. Compute plant foliage color (health + golden ripening in mature stage + per-plant HSL jitter)
+      const ripe = THREE.MathUtils.smoothstep(s, 0.76, 1.0);
+      healthColor(health, baseLeafColor).lerp(GOLD, ripe * (0.3 + 0.7 * health));
+      instanceLeafColor.copy(baseLeafColor).offsetHSL(pl.hueShift, 0, pl.lightShift);
+      instanceAccentColor.copy(WHITE).lerp(DRY, (1 - health) * 0.55);
+
+      const leanZ = stressLean * clamp01(s * 2.5);
+
+      // Update each of the 4 stage InstancedMeshes for plant i
+      for (let st = 0; st < 4; st++) {
+        const [folMesh, accMesh] = stagePairs[st];
+        if (!folMesh || !accMesh) continue;
+
+        const w = stageScaleList[st] * pl.scaleJitter;
+        const sxz = popXZ * w * (0.75 + 0.25 * stunt);
+        const sy = popY * w * stunt;
+
+        if (sxz <= 0.001 || sy <= 0.001) {
+          dummy.position.set(pl.x, -10, pl.z);
+          dummy.scale.setScalar(0.00001);
+        } else {
+          dummy.position.set(pl.x, 0.2, pl.z);
+          dummy.rotation.set(0, pl.yaw, leanZ);
+          dummy.scale.set(sxz, sy, sxz);
+        }
+        dummy.updateMatrix();
+
+        folMesh.setMatrixAt(i, dummy.matrix);
+        folMesh.setColorAt(i, instanceLeafColor);
+
+        accMesh.setMatrixAt(i, dummy.matrix);
+        accMesh.setColorAt(i, instanceAccentColor);
+      }
+    }
+
+    if (seedRef.current) seedRef.current.instanceMatrix.needsUpdate = true;
+    stagePairs.forEach(([folMesh, accMesh]) => {
+      if (folMesh) {
+        folMesh.instanceMatrix.needsUpdate = true;
+        if (folMesh.instanceColor) folMesh.instanceColor.needsUpdate = true;
+      }
+      if (accMesh) {
+        accMesh.instanceMatrix.needsUpdate = true;
+        if (accMesh.instanceColor) accMesh.instanceColor.needsUpdate = true;
+      }
+    });
+  });
+
+  if (!planted || !plants.length) return null;
+  const count = plants.length;
+
+  return (
+    <group>
+      {/* Instanced falling seeds during initial planting */}
+      <instancedMesh ref={seedRef} args={[seedGeo, mats.seed, count]} frustumCulled={false} />
+
+      {/* Stage 1: Seedling (V2–V3 sprout + soil mound) */}
+      <instancedMesh
+        ref={seedlingFolRef}
+        args={[stageModels.seedling.foliageGeo, mats.foliage, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={seedlingAccRef}
+        args={[stageModels.seedling.accentGeo, mats.accent, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+
+      {/* Stage 2: Vegetative / Knee-High Whorl (V6–V8 whorl + brace roots) */}
+      <instancedMesh
+        ref={vegFolRef}
+        args={[stageModels.vegetative.foliageGeo, mats.foliage, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={vegAccRef}
+        args={[stageModels.vegetative.accentGeo, mats.accent, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+
+      {/* Stage 3: Tasseling & Silking (Full stalk + branched pollen tassel + husked ears & silks) */}
+      <instancedMesh
+        ref={tasselFolRef}
+        args={[stageModels.tasseling.foliageGeo, mats.foliage, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={tasselAccRef}
+        args={[stageModels.tasseling.accentGeo, mats.accent, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+
+      {/* Stage 4: Mature / Dry Harvest (Senescing stalk + peeled straw husks + golden kernel cobs) */}
+      <instancedMesh
+        ref={matureFolRef}
+        args={[stageModels.mature.foliageGeo, mats.foliage, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+      <instancedMesh
+        ref={matureAccRef}
+        args={[stageModels.mature.accentGeo, mats.accent, count]}
+        castShadow
+        receiveShadow
+        frustumCulled={false}
+      />
+    </group>
+  );
 }
