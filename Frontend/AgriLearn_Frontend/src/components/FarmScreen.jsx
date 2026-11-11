@@ -285,6 +285,12 @@ export default function FarmScene() {
         >
           {muted ? "🔇" : "🔊"}
         </button>
+        <Link
+  to="/home"
+  className="absolute top-16 left-4 rounded-full bg-white/90 px-3 py-2 text-sm shadow hover:bg-white"
+>
+  ← Home
+</Link>
 
         <div
           role="group"

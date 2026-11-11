@@ -253,7 +253,7 @@ export default function AuthScreen() {
   const location = useLocation();
   const navigate = useNavigate();
   const mode = location.pathname.endsWith("/signup") ? "signup" : "login";
-  const from = location.state?.from ?? "/";
+  const from = location.state?.from ?? "/home";
 
   useEffect(() => {
     document.title = mode === "signup" ? "Sign up · AgriLearn Kenya" : "Log in · AgriLearn Kenya";
